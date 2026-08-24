@@ -176,6 +176,28 @@ describe("x402 adapter contract", () => {
     scripted.assertConsumed();
   });
 
+  it("rejects malformed ref responses at the SDK boundary", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://pay.example/ref",
+        response: Response.json({ refId: "ref_malformed", refUrl: "x402pay://ref_malformed" }),
+      },
+    ]);
+    await expect(
+      createX402Adapter(options(createNonceStore())).checkout?.create(context(scripted.fetch), {
+        orderId: parseId<"OrderId">("ord_x4020001", "ord"),
+        lines: [],
+        grossTotal: money("2500", "USD"),
+        total: money("2500", "USD"),
+        successUrl: "https://merchant.example/success",
+        cancelUrl: "https://merchant.example/cancel",
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({ code: "provider_response_invalid", operation: "x402.refs.decode" });
+    scripted.assertConsumed();
+  });
+
   it("requires signed receipt and sufficient chain confirmations", async () => {
     const confirmed = createScriptedFetch([
       {

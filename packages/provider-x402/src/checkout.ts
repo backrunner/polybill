@@ -8,6 +8,7 @@ import { PolybillError, parseIsoDateTime } from "@polybill/core";
 import { createPaymentRef, getRef, listRefs } from "x402-paysdk/merchant";
 import { InjectedMerchantClient } from "./client.js";
 import type { X402AdapterOptions } from "./config.js";
+import { decodePaymentRef, decodePaymentRefSnapshot, decodeRefList } from "./refs-codec.js";
 
 export function createX402Checkout(options: X402AdapterOptions): CheckoutProvider {
   return {
@@ -18,18 +19,20 @@ export function createX402Checkout(options: X402AdapterOptions): CheckoutProvide
           "x402 fixed settlement only accepts the configured pricing currency",
         );
       const amount = toAtomicAmount(command.total.amount, options.settlement.atomicPerMinor);
-      const ref = await createPaymentRef(client(context, options), {
-        payTo: options.payTo,
-        network: options.network,
-        asset: "USDC",
-        amount,
-        invoiceId: command.orderId,
-        ...(options.notifyUrl === undefined ? {} : { notifyUrl: options.notifyUrl }),
-        ...(options.expiresInSeconds === undefined
-          ? {}
-          : { expiresInSecs: options.expiresInSeconds }),
-        label: `Polybill order ${command.orderId}`,
-      });
+      const ref = decodePaymentRef(
+        await createPaymentRef(client(context, options), {
+          payTo: options.payTo,
+          network: options.network,
+          asset: "USDC",
+          amount,
+          invoiceId: command.orderId,
+          ...(options.notifyUrl === undefined ? {} : { notifyUrl: options.notifyUrl }),
+          ...(options.expiresInSeconds === undefined
+            ? {}
+            : { expiresInSecs: options.expiresInSeconds }),
+          label: `Polybill order ${command.orderId}`,
+        }),
+      );
       const value: ProviderCheckoutSnapshot = {
         externalId: ref.refId,
         status: "open",
@@ -42,7 +45,7 @@ export function createX402Checkout(options: X402AdapterOptions): CheckoutProvide
       return result(context, value);
     },
     async get(context, externalId) {
-      const ref = await getRef(client(context, options), externalId);
+      const ref = decodePaymentRefSnapshot(await getRef(client(context, options), externalId));
       const value: ProviderCheckoutSnapshot = {
         externalId,
         status: "open",
@@ -59,11 +62,13 @@ export function createX402Checkout(options: X402AdapterOptions): CheckoutProvide
       let cursor: string | undefined;
       const seenCursors = new Set<string>();
       for (let page = 0; page < 100; page += 1) {
-        const refs = await listRefs(client(context, options), {
-          payTo: options.payTo,
-          limit: 100,
-          ...(cursor === undefined ? {} : { cursor }),
-        });
+        const refs = decodeRefList(
+          await listRefs(client(context, options), {
+            payTo: options.payTo,
+            limit: 100,
+            ...(cursor === undefined ? {} : { cursor }),
+          }),
+        );
         const match = refs.items.find(
           (item) =>
             item.invoiceId === command.orderId &&
@@ -73,7 +78,17 @@ export function createX402Checkout(options: X402AdapterOptions): CheckoutProvide
             item.amount === amount,
         );
         if (match !== undefined) {
-          const snapshot = await getRef(client(context, options), match.refId);
+          const snapshot = decodePaymentRefSnapshot(
+            await getRef(client(context, options), match.refId),
+          );
+          if (
+            snapshot.network !== options.network ||
+            snapshot.payTo.toLowerCase() !== options.payTo.toLowerCase() ||
+            snapshot.asset !== "USDC" ||
+            snapshot.amount !== amount ||
+            snapshot.invoiceId !== command.orderId
+          )
+            throw new TypeError("x402 recovered ref did not match the requested order");
           return result(context, {
             externalId: match.refId,
             status: match.status === "revoked" ? "canceled" : "open",
