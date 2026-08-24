@@ -94,6 +94,23 @@ describe("Paddle Billing webhook contract", () => {
         method: "PATCH",
         url: `https://sandbox-api.paddle.com/subscriptions/${subscription.id}`,
         response: Response.json({
+          data: { ...subscription, items: [{ price, quantity: 3 }] },
+        }),
+      },
+      {
+        method: "POST",
+        url: `https://sandbox-api.paddle.com/subscriptions/${subscription.id}/pause`,
+        response: Response.json({ data: { ...subscription, status: "paused" } }),
+      },
+      {
+        method: "POST",
+        url: `https://sandbox-api.paddle.com/subscriptions/${subscription.id}/resume`,
+        response: Response.json({ data: subscription }),
+      },
+      {
+        method: "POST",
+        url: `https://sandbox-api.paddle.com/subscriptions/${subscription.id}/cancel`,
+        response: Response.json({
           data: {
             ...subscription,
             scheduled_change: {
@@ -145,8 +162,48 @@ describe("Paddle Billing webhook contract", () => {
       value: { status: "active", items: [{ externalPriceId: price.id, quantity: 2 }] },
     });
     await expect(
+      adapter.subscriptions?.changeItems?.(ctx, subscription.id, {
+        items: [{ externalPriceId: price.id, quantity: 3 }],
+        policy: { timing: "period_end", proration: "none" },
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(
+      adapter.subscriptions?.changeItems?.(ctx, subscription.id, {
+        items: [{ externalPriceId: price.id, quantity: 3 }],
+        policy: { timing: "immediately", proration: "prorate_next_invoice" },
+      }),
+    ).resolves.toMatchObject({ value: { items: [{ externalPriceId: price.id, quantity: 3 }] } });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, subscription.id, {
+        timing: "immediately",
+        invoiceBehavior: "void",
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, subscription.id, {
+        timing: "immediately",
+        invoiceBehavior: "stop_billing",
+      }),
+    ).resolves.toMatchObject({ value: { status: "paused" } });
+    await expect(adapter.subscriptions?.resume?.(ctx, subscription.id)).resolves.toMatchObject({
+      value: { status: "active" },
+    });
+    await expect(
       adapter.subscriptions?.cancel?.(ctx, subscription.id, "period_end"),
     ).resolves.toMatchObject({ value: { cancelAtPeriodEnd: true } });
+    await expect(scripted.requests.at(-4)?.clone().json()).resolves.toMatchObject({
+      proration_billing_mode: "prorated_next_billing_period",
+    });
+    await expect(scripted.requests.at(-3)?.clone().json()).resolves.toEqual({
+      effective_from: "immediately",
+    });
+    await expect(scripted.requests.at(-2)?.clone().json()).resolves.toEqual({
+      effective_from: "immediately",
+      on_resume: "start_new_billing_period",
+    });
+    await expect(scripted.requests.at(-1)?.clone().json()).resolves.toEqual({
+      effective_from: "next_billing_period",
+    });
     scripted.assertConsumed();
   });
 });

@@ -35,7 +35,28 @@ export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot
       "customer.delete": native,
       "customer.portal": native,
       "subscription.read": native,
+      "subscription.change_items": {
+        ...native,
+        constraints: {
+          timing: ["immediately"],
+          proration: ["none", "prorate_next_invoice", "prorate_immediately"],
+        },
+      },
+      "subscription.proration": native,
+      "subscription.pause": {
+        ...native,
+        constraints: {
+          timing: ["immediately", "period_end"],
+          invoiceBehavior: ["stop_billing"],
+        },
+      },
+      "subscription.resume": {
+        ...native,
+        constraints: { onResume: "start_new_billing_period" },
+      },
       "subscription.cancel": native,
+      "refund.partial": native,
+      "refund.full": native,
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",

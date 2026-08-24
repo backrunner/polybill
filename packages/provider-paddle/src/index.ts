@@ -3,6 +3,7 @@ import { paddleCapabilities } from "./capabilities.js";
 import { paddleCheckout } from "./checkout.js";
 import { paddleCatalog } from "./catalog.js";
 import { paddleCustomers } from "./customers.js";
+import { paddleRefunds } from "./refunds.js";
 import { paddleSubscriptions } from "./subscriptions.js";
 import { paddleWebhooks } from "./webhooks.js";
 
@@ -19,6 +20,7 @@ export function createPaddleAdapter(): ProviderAdapter {
     customers: paddleCustomers,
     checkout: paddleCheckout,
     subscriptions: paddleSubscriptions,
+    refunds: paddleRefunds,
     webhooks: paddleWebhooks,
     reconcile: {
       async checkout(context, externalId) {

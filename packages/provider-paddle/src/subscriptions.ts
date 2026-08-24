@@ -6,7 +6,14 @@ import {
   type ProviderSubscriptionSnapshot,
   type SubscriptionProvider,
 } from "@polybill/adapter-kit";
-import { parseIsoDateTime, type SubscriptionStatus } from "@polybill/core";
+import {
+  PolybillError,
+  parseIsoDateTime,
+  type ConnectionId,
+  type SubscriptionItemChangePolicy,
+  type SubscriptionPausePolicy,
+  type SubscriptionStatus,
+} from "@polybill/core";
 import { paddleRequest } from "./client.js";
 import { paddleResult } from "./result.js";
 
@@ -21,6 +28,50 @@ export const paddleSubscriptions: SubscriptionProvider = {
       ),
     );
   },
+  async changeItems(context, externalId, input) {
+    assertItemChange(context.connection.id, input.policy);
+    return update(context, externalId, {
+      items: input.items.map((item) => ({
+        price_id: item.externalPriceId,
+        quantity: item.quantity,
+      })),
+      proration_billing_mode: proration(input.policy.proration),
+    });
+  },
+  async pause(context, externalId, policy) {
+    assertPause(context.connection.id, policy);
+    return paddleResult(
+      context,
+      decode(
+        (
+          await paddleRequest(
+            context,
+            "POST",
+            `/subscriptions/${encodeURIComponent(externalId)}/pause`,
+            {
+              effective_from:
+                policy.timing === "immediately" ? "immediately" : "next_billing_period",
+            },
+          )
+        ).json(),
+      ),
+    );
+  },
+  async resume(context, externalId) {
+    return paddleResult(
+      context,
+      decode(
+        (
+          await paddleRequest(
+            context,
+            "POST",
+            `/subscriptions/${encodeURIComponent(externalId)}/resume`,
+            { effective_from: "immediately", on_resume: "start_new_billing_period" },
+          )
+        ).json(),
+      ),
+    );
+  },
   async cancel(context, externalId, timing) {
     return paddleResult(
       context,
@@ -28,13 +79,10 @@ export const paddleSubscriptions: SubscriptionProvider = {
         (
           await paddleRequest(
             context,
-            "PATCH",
-            `/subscriptions/${encodeURIComponent(externalId)}`,
+            "POST",
+            `/subscriptions/${encodeURIComponent(externalId)}/cancel`,
             {
-              scheduled_change: {
-                action: "cancel",
-                effective_at: timing === "immediately" ? "immediately" : "next_billing_period",
-              },
+              effective_from: timing === "immediately" ? "immediately" : "next_billing_period",
             },
           )
         ).json(),
@@ -42,6 +90,55 @@ export const paddleSubscriptions: SubscriptionProvider = {
     );
   },
 };
+
+async function update(
+  context: Parameters<NonNullable<SubscriptionProvider["get"]>>[0],
+  externalId: string,
+  body: unknown,
+) {
+  return paddleResult(
+    context,
+    decode(
+      (
+        await paddleRequest(
+          context,
+          "PATCH",
+          `/subscriptions/${encodeURIComponent(externalId)}`,
+          body,
+        )
+      ).json(),
+    ),
+  );
+}
+
+function assertItemChange(connectionId: ConnectionId, policy: SubscriptionItemChangePolicy): void {
+  if (policy.timing !== "immediately")
+    throw unsupported(connectionId, "Paddle item changes take effect immediately");
+}
+
+function assertPause(connectionId: ConnectionId, policy: SubscriptionPausePolicy): void {
+  if (policy.invoiceBehavior !== "stop_billing")
+    throw unsupported(
+      connectionId,
+      "Paddle pause stops billing and cannot map this invoice policy",
+    );
+}
+
+function proration(value: SubscriptionItemChangePolicy["proration"]): string {
+  if (value === "none") return "do_not_bill";
+  if (value === "prorate_next_invoice") return "prorated_next_billing_period";
+  return "prorated_immediately";
+}
+
+function unsupported(connectionId: ConnectionId, message: string): PolybillError {
+  return new PolybillError(message, {
+    code: "unsupported_capability",
+    operation: "paddle.subscription.update",
+    provider: "paddle",
+    connectionId,
+    retryable: false,
+  });
+}
 
 function decode(value: unknown): ProviderSubscriptionSnapshot {
   const data = object(
