@@ -42,6 +42,7 @@ export const capabilityKeys = [
   "subscription.trial",
   "subscription.mandate",
   "discount.create",
+  "discount.read",
   "discount.redeem",
   "license.issue",
   "license.validate",

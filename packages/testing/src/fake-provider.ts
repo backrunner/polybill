@@ -6,6 +6,7 @@ import {
   type ProviderCheckoutSnapshot,
   type ProviderCustomerSnapshot,
   type ProviderContext,
+  type ProviderDiscountSnapshot,
   type ProviderOperationResult,
   type ProviderPriceSnapshot,
   type ProviderProductSnapshot,
@@ -38,6 +39,7 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
   const customers = new Map<string, ProviderCustomerSnapshot>();
   const subscriptions = new Map<string, ProviderSubscriptionSnapshot>();
   const refunds = new Map<string, ProviderRefundSnapshot>();
+  const discounts = new Map<string, ProviderDiscountSnapshot>();
   let createCount = 0;
   let failAfterCreate = options.failAfterCreateOnce ?? false;
   let rejectCreate = options.rejectCreateOnce ?? false;
@@ -86,6 +88,14 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
           "checkout.ad_hoc_price": nativeCapability(),
           "checkout.multi_item": multi,
           "checkout.discount":
+            options.discount === true
+              ? nativeCapability()
+              : unsupportedCapability("fake discount disabled"),
+          "discount.create":
+            options.discount === true
+              ? nativeCapability()
+              : unsupportedCapability("fake discount disabled"),
+          "discount.read":
             options.discount === true
               ? nativeCapability()
               : unsupportedCapability("fake discount disabled"),
@@ -322,6 +332,28 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       },
       async get(context, externalId) {
         return result(context, required(refunds, externalId));
+      },
+    },
+    discounts: {
+      async create(context, input) {
+        const value: ProviderDiscountSnapshot = {
+          externalId: `fake_discount_${discounts.size + 1}`,
+          value: input.discount.value,
+          status: "active",
+          externalProductIds: input.externalProductIds,
+          ...(input.discount.maxRedemptions === undefined
+            ? {}
+            : { maxRedemptions: input.discount.maxRedemptions }),
+          ...(input.discount.expiresAt === undefined
+            ? {}
+            : { expiresAt: input.discount.expiresAt }),
+          rawStatus: "active",
+        };
+        discounts.set(value.externalId, value);
+        return result(context, value);
+      },
+      async get(context, externalId) {
+        return result(context, required(discounts, externalId));
       },
     },
     webhooks: {

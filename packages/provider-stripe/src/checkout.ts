@@ -8,7 +8,7 @@ import {
   type ProviderContext,
   type ProviderOperationResult,
 } from "@polybill/adapter-kit";
-import { parseIsoDateTime } from "@polybill/core";
+import { money, parseIsoDateTime } from "@polybill/core";
 import { stripeRequest } from "./client.js";
 
 export const stripeCheckout: CheckoutProvider = {
@@ -60,6 +60,8 @@ function encode(command: ProviderCheckoutCommand): URLSearchParams {
     client_reference_id: command.orderId,
   });
   if (command.customerEmail !== undefined) body.set("customer_email", command.customerEmail);
+  if (command.discount !== undefined)
+    body.set("discounts[0][coupon]", command.discount.externalDiscountId);
   for (const [key, value] of Object.entries(command.metadata)) body.set(`metadata[${key}]`, value);
   command.lines.forEach((line, index) => {
     const prefix = `line_items[${index}]`;
@@ -87,12 +89,17 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const status = statusOf(optionalString(root, "status"));
   const expires = root.expires_at;
   const url = optionalString(root, "url");
+  const currency = optionalString(root, "currency");
+  const amountTotal = root.amount_total;
   return {
     externalId: stringField(root, "id", "stripe", "stripe.checkout.decode"),
     status,
     ...(url === undefined ? {} : { url }),
     ...(typeof expires === "number"
       ? { expiresAt: parseIsoDateTime(new Date(expires * 1000).toISOString()) }
+      : {}),
+    ...(Number.isSafeInteger(amountTotal) && Number(amountTotal) >= 0 && currency !== undefined
+      ? { total: money(String(amountTotal), currency.toUpperCase()) }
       : {}),
     rawStatus: optionalString(root, "status") ?? "unknown",
   };

@@ -1,5 +1,7 @@
 import type {
   BillingInterval,
+  Discount,
+  DiscountValue,
   CustomerId,
   IsoDateTime,
   Money,
@@ -189,4 +191,28 @@ export interface RefundProvider {
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderRefundSnapshot>>;
+}
+
+export interface ProviderDiscountSnapshot {
+  readonly externalId: string;
+  readonly value: DiscountValue;
+  readonly status: "active" | "unavailable" | "unknown";
+  readonly externalProductIds: readonly string[];
+  readonly maxRedemptions?: number;
+  readonly expiresAt?: IsoDateTime;
+  readonly rawStatus: string;
+}
+
+export interface DiscountProvider {
+  create?(
+    context: ProviderContext,
+    input: {
+      readonly discount: Discount;
+      readonly externalProductIds: readonly string[];
+    },
+  ): Promise<ProviderOperationResult<ProviderDiscountSnapshot>>;
+  get?(
+    context: ProviderContext,
+    externalId: string,
+  ): Promise<ProviderOperationResult<ProviderDiscountSnapshot>>;
 }

@@ -35,7 +35,7 @@ describe("polybill facade", () => {
       tenantId,
       connection,
       credentials: { apiKey: "test" },
-      adapter: createFakeProvider(),
+      adapter: createFakeProvider({ discount: true }),
       store,
       crypto: createWebCryptoPort(),
       clock: new VirtualClock("2026-08-25T00:00:00.000Z"),
@@ -62,7 +62,7 @@ describe("polybill facade", () => {
       tenantId,
       connection,
       credentials: { apiKey: "test" },
-      adapter: createFakeProvider(),
+      adapter: createFakeProvider({ discount: true }),
       store,
       crypto: createWebCryptoPort(),
       clock: new VirtualClock("2026-08-25T00:00:00.000Z"),
@@ -235,6 +235,14 @@ describe("polybill facade", () => {
       code: "WELCOME10",
       name: "Welcome discount",
       value: { kind: "percentage", basisPoints: 1_000 },
+      eligibleSkuIds: [sku.id],
+    });
+    await expect(
+      client.discountSync.push(discount.id, parseIdempotencyKey("facade:discount:sync:0001")),
+    ).resolves.toMatchObject({ status: "published" });
+    await expect(client.discountSync.diff(discount.id)).resolves.toMatchObject({
+      status: "matched",
+      differences: [],
     });
     await expect(discountService.findByCode("welcome10")).resolves.toEqual(discount);
     await expect(

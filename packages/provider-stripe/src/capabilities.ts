@@ -17,6 +17,7 @@ export function stripeCapabilities(context: ProviderContext): CapabilitySnapshot
       "checkout.hosted": native,
       "checkout.ad_hoc_price": native,
       "checkout.multi_item": native,
+      "checkout.discount": native,
       "payment.one_time": native,
       "catalog.product.read": native,
       "catalog.product.create": native,
@@ -54,6 +55,14 @@ export function stripeCapabilities(context: ProviderContext): CapabilitySnapshot
       ),
       "refund.partial": native,
       "refund.full": native,
+      "discount.create": {
+        ...native,
+        constraints: {
+          unsupported: ["startsAt", "eligibleCustomerRefs", "maxRedemptionsPerCustomer"],
+        },
+      },
+      "discount.read": native,
+      "discount.redeem": native,
       "webhook.verify": native,
       "commercial.merchant_of_record": unsupportedCapability(
         "Base Stripe Payments is a payment processor, not a merchant of record",

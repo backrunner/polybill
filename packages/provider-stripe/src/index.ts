@@ -3,6 +3,7 @@ import { stripeCapabilities } from "./capabilities.js";
 import { stripeCatalog } from "./catalog.js";
 import { stripeCheckout } from "./checkout.js";
 import { stripeCustomers } from "./customers.js";
+import { stripeDiscounts } from "./discounts.js";
 import { stripeRefunds } from "./refunds.js";
 import { stripeMigration } from "./migration.js";
 import { stripeSubscriptions } from "./subscriptions.js";
@@ -22,6 +23,7 @@ export function createStripeAdapter(): ProviderAdapter {
     checkout: stripeCheckout,
     subscriptions: stripeSubscriptions,
     refunds: stripeRefunds,
+    discounts: stripeDiscounts,
     migration: stripeMigration,
     webhooks: stripeWebhooks,
     reconcile: {

@@ -73,6 +73,126 @@ describe("Stripe adapter contract", () => {
     scripted.assertConsumed();
   });
 
+  it("publishes a coupon and proves the discounted checkout total", async () => {
+    const coupon = {
+      id: "coupon_fixture",
+      amount_off: null,
+      currency: null,
+      percent_off: 12.34,
+      valid: true,
+      redeem_by: 1789689600,
+      applies_to: { products: ["prod_fixture"] },
+      max_redemptions: 20,
+    };
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/coupons",
+        response: Response.json(coupon),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/checkout/sessions",
+        response: Response.json({
+          id: "cs_discount_fixture",
+          status: "open",
+          url: "https://checkout.stripe.test/cs_discount_fixture",
+          amount_total: 2191,
+          currency: "usd",
+        }),
+      },
+      {
+        method: "GET",
+        url: "https://api.stripe.com/v1/coupons/coupon_fixture",
+        response: Response.json(coupon),
+      },
+    ]);
+    const adapter = createStripeAdapter();
+    const ctx = context(scripted.fetch);
+    const discountId = parseId<"DiscountId">("disc_stripe001", "disc");
+    const created = await adapter.discounts?.create?.(ctx, {
+      discount: {
+        id: discountId,
+        code: "STRIPE1234",
+        name: "Stripe percentage",
+        value: { kind: "percentage", basisPoints: 1_234 },
+        eligibleSkuIds: [parseId<"SkuId">("sku_stripe01", "sku")],
+        eligibleCustomerRefs: [],
+        expiresAt: parseIsoDateTime("2026-09-25T00:00:00.000Z"),
+        maxRedemptions: 20,
+        status: "active",
+        createdAt: parseIsoDateTime("2026-08-25T00:00:00.000Z"),
+      },
+      externalProductIds: ["prod_fixture"],
+    });
+    expect(created?.value).toMatchObject({
+      externalId: "coupon_fixture",
+      value: { kind: "percentage", basisPoints: 1_234 },
+      externalProductIds: ["prod_fixture"],
+      maxRedemptions: 20,
+    });
+    const couponBody = new URLSearchParams(await scripted.requests[0]?.clone().text());
+    expect(couponBody.get("percent_off")).toBe("12.34");
+    expect(couponBody.get("applies_to[products][0]")).toBe("prod_fixture");
+
+    const result = await adapter.checkout?.create(ctx, {
+      orderId: parseId<"OrderId">("ord_stripedisc1", "ord"),
+      lines: [
+        {
+          skuId: parseId<"SkuId">("sku_stripe01", "sku"),
+          quantity: 1,
+          price: { kind: "one_time", unit: money("2500", "USD") },
+          unitAmount: money("2500", "USD"),
+          externalPriceId: "price_fixture",
+        },
+      ],
+      grossTotal: money("2500", "USD"),
+      discount: {
+        discountId,
+        code: "STRIPE1234",
+        amount: money("309", "USD"),
+        externalDiscountId: "coupon_fixture",
+      },
+      total: money("2191", "USD"),
+      successUrl: "https://merchant.example/success",
+      cancelUrl: "https://merchant.example/cancel",
+      metadata: {},
+    });
+    expect(result?.value.total).toEqual(money("2191", "USD"));
+    const checkoutBody = new URLSearchParams(await scripted.requests[1]?.clone().text());
+    expect(checkoutBody.get("discounts[0][coupon]")).toBe("coupon_fixture");
+    await expect(adapter.discounts?.get?.(ctx, "coupon_fixture")).resolves.toMatchObject({
+      value: { status: "active" },
+    });
+    scripted.assertConsumed();
+  });
+
+  it("rejects discount fields Stripe cannot represent before transport", async () => {
+    let calls = 0;
+    const adapter = createStripeAdapter();
+    const ctx = context(async () => {
+      calls += 1;
+      return Response.json({});
+    });
+    await expect(
+      adapter.discounts?.create?.(ctx, {
+        discount: {
+          id: parseId<"DiscountId">("disc_stripe002", "disc"),
+          code: "STRIPE1235",
+          name: "Unsupported",
+          value: { kind: "percentage", basisPoints: 1_000 },
+          eligibleSkuIds: [],
+          eligibleCustomerRefs: ["customer_1"],
+          maxRedemptionsPerCustomer: 1,
+          status: "active",
+          createdAt: parseIsoDateTime("2026-08-25T00:00:00.000Z"),
+        },
+        externalProductIds: [],
+      }),
+    ).rejects.toThrow("customer allowlists");
+    expect(calls).toBe(0);
+  });
+
   it("verifies a fixed Stripe HMAC vector over exact raw bytes", async () => {
     const adapter = createStripeAdapter();
     const body =

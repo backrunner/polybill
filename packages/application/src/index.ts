@@ -5,6 +5,7 @@ export * from "./checkout.js";
 export * from "./customers.js";
 export * from "./discounts.js";
 export * from "./discount-ports.js";
+export * from "./discount-sync.js";
 export * from "./ports.js";
 export * from "./queries.js";
 export * from "./reconciliation.js";

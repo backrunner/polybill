@@ -18,6 +18,7 @@ import type { ProviderMigrationSource } from "./migration.js";
 import type {
   CatalogProvider,
   CustomerProvider,
+  DiscountProvider,
   RefundProvider,
   SubscriptionProvider,
 } from "./resource-ports.js";
@@ -180,6 +181,7 @@ export interface ProviderAdapter {
   readonly checkout?: CheckoutProvider;
   readonly subscriptions?: SubscriptionProvider;
   readonly refunds?: RefundProvider;
+  readonly discounts?: DiscountProvider;
   readonly migration?: ProviderMigrationSource;
   readonly webhooks: WebhookProvider;
   readonly reconcile: ReconcileProvider;

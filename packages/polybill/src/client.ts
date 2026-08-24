@@ -14,6 +14,7 @@ import {
   CommerceQueryService,
   CustomerService,
   DiscountService,
+  DiscountSyncService,
   RefundService,
   ReconciliationService,
   ResourceRuntime,
@@ -82,6 +83,7 @@ export interface PolybillClient {
   readonly subscriptions: SubscriptionService;
   readonly reconcile: ReconciliationService;
   readonly discounts: DiscountService;
+  readonly discountSync: DiscountSyncService;
   readonly entitlements: EntitlementService | undefined;
   readonly licenses: LicenseService | undefined;
   readonly vouchers: VoucherService | undefined;
@@ -160,6 +162,7 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
     subscriptions: new SubscriptionService(resources),
     reconcile: new ReconciliationService(resources),
     discounts,
+    discountSync: new DiscountSyncService(resources),
     entitlements,
     licenses,
     vouchers,
