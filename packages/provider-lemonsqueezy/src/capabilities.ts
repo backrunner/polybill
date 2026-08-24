@@ -18,6 +18,19 @@ export function lemonCapabilities(context: ProviderContext): CapabilitySnapshot 
       "checkout.ad_hoc_price": native,
       "checkout.multi_item": unsupportedCapability("A Lemon Squeezy checkout targets one variant"),
       "payment.one_time": native,
+      "customer.read": native,
+      "customer.update": native,
+      "customer.portal": native,
+      "subscription.read": native,
+      "subscription.pause": {
+        ...native,
+        constraints: { mode: "void" },
+      },
+      "subscription.resume": native,
+      "subscription.cancel": {
+        ...native,
+        constraints: { timing: "period_end_only" },
+      },
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",

@@ -23,6 +23,18 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
       "checkout.discount": native,
       "checkout.tax": native,
       "payment.one_time": native,
+      "customer.read": native,
+      "customer.create": { ...native, constraints: { requiresEmail: true, requiresName: true } },
+      "customer.update": native,
+      "customer.portal": native,
+      "subscription.read": native,
+      "subscription.cancel": native,
+      "subscription.pause": native,
+      "subscription.resume": native,
+      "refund.full": native,
+      "refund.partial": unsupportedCapability(
+        "Dodo partial refunds require provider item IDs that are not present in the canonical amount-only command",
+      ),
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",

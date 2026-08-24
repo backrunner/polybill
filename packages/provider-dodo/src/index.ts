@@ -1,6 +1,9 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { dodoCapabilities } from "./capabilities.js";
 import { dodoCheckout } from "./checkout.js";
+import { dodoCustomers } from "./customers.js";
+import { dodoRefunds } from "./refunds.js";
+import { dodoSubscriptions } from "./subscriptions.js";
 import { dodoWebhooks } from "./webhooks.js";
 
 export function createDodoAdapter(): ProviderAdapter {
@@ -12,7 +15,10 @@ export function createDodoAdapter(): ProviderAdapter {
       maturity: "experimental",
     },
     getCapabilities: async (context) => dodoCapabilities(context),
+    customers: dodoCustomers,
     checkout: dodoCheckout,
+    subscriptions: dodoSubscriptions,
+    refunds: dodoRefunds,
     webhooks: dodoWebhooks,
     reconcile: {
       async checkout(context, externalId) {

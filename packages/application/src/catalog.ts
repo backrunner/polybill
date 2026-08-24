@@ -41,6 +41,15 @@ export interface CreatePriceCommand {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
+export interface UpdateProductCommand {
+  readonly idempotencyKey: IdempotencyKey;
+  readonly name?: string;
+  readonly description?: string;
+  readonly media?: readonly string[];
+  readonly taxCategory?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
 export class CatalogService {
   readonly #runtime: ResourceRuntime;
 
@@ -57,9 +66,9 @@ export class CatalogService {
       decodeReplay: decodeProduct,
       execute: async (context) => {
         await this.#runtime.requireCapability("catalog.product.create", context);
-        const port = this.#runtime.options.adapter.catalog;
+        const port = this.#runtime.options.adapter.catalog?.createProduct;
         if (port === undefined) throw unsupported("catalog.product.create");
-        const remote = await port.createProduct(context, {
+        const remote = await port(context, {
           name: command.name,
           ...(command.description === undefined ? {} : { description: command.description }),
           metadata: command.metadata ?? {},
@@ -119,7 +128,7 @@ export class CatalogService {
       decodeReplay: decodePrice,
       execute: async (context) => {
         await this.#runtime.requireCapability("catalog.price.create", context);
-        const port = this.#runtime.options.adapter.catalog;
+        const port = this.#runtime.options.adapter.catalog?.createPrice;
         if (port === undefined) throw unsupported("catalog.price.create");
         const externalProductId = requireExternalId(
           await this.#runtime.options.store.getExternalId(
@@ -130,7 +139,7 @@ export class CatalogService {
           ),
           "catalog.price.create",
         );
-        const remote = await port.createPrice(context, {
+        const remote = await port(context, {
           externalProductId,
           model: command.model,
           taxBehavior: command.taxBehavior,
@@ -147,6 +156,138 @@ export class CatalogService {
         };
         await this.#runtime.options.store.commitResource({
           ...commitBase(this.#runtime, "price", price.id, remote.value.externalId),
+          value: price,
+          evidence: remote.evidence,
+        });
+        return price;
+      },
+    });
+  }
+
+  async updateProduct(id: ProductId, command: UpdateProductCommand): Promise<Product> {
+    const current = await this.getProduct(id);
+    if (current === undefined) throw notFound("catalog.product.update");
+    if (command.name !== undefined) text(command.name, "product name");
+    return this.#runtime.mutate({
+      operation: "catalog.product.update",
+      key: command.idempotencyKey,
+      payload: { id, ...command },
+      decodeReplay: decodeProduct,
+      execute: async (context) => {
+        await this.#runtime.requireCapability("catalog.product.update", context);
+        const port = this.#runtime.options.adapter.catalog?.updateProduct;
+        if (port === undefined) throw unsupported("catalog.product.update");
+        const externalId = requireExternalId(
+          await this.#runtime.options.store.getExternalId(
+            this.#runtime.options.tenantId,
+            this.#runtime.options.connection.id,
+            "product",
+            id,
+          ),
+          "catalog.product.update",
+        );
+        const remote = await port(context, externalId, {
+          ...(command.name === undefined ? {} : { name: command.name }),
+          ...(command.description === undefined ? {} : { description: command.description }),
+          ...(command.metadata === undefined ? {} : { metadata: command.metadata }),
+        });
+        const product: Product = {
+          ...current,
+          ...(command.name === undefined ? {} : { name: command.name }),
+          ...(command.description === undefined ? {} : { description: command.description }),
+          ...(command.media === undefined ? {} : { media: command.media }),
+          ...(command.taxCategory === undefined ? {} : { taxCategory: command.taxCategory }),
+          ...(command.metadata === undefined ? {} : { metadata: command.metadata }),
+          status: remote.value.status === "archived" ? "archived" : current.status,
+          version: current.version + 1,
+        };
+        await this.#runtime.options.store.commitResource({
+          ...commitBase(this.#runtime, "product", id, externalId),
+          value: product,
+          evidence: remote.evidence,
+        });
+        return product;
+      },
+    });
+  }
+
+  async archiveProduct(id: ProductId, idempotencyKey: IdempotencyKey): Promise<Product> {
+    const current = await this.getProduct(id);
+    if (current === undefined) throw notFound("catalog.product.archive");
+    return this.#runtime.mutate({
+      operation: "catalog.product.archive",
+      key: idempotencyKey,
+      payload: { id },
+      decodeReplay: decodeProduct,
+      execute: async (context) => {
+        await this.#runtime.requireCapability("catalog.product.archive", context);
+        const port = this.#runtime.options.adapter.catalog?.archiveProduct;
+        if (port === undefined) throw unsupported("catalog.product.archive");
+        const externalId = requireExternalId(
+          await this.#runtime.options.store.getExternalId(
+            this.#runtime.options.tenantId,
+            this.#runtime.options.connection.id,
+            "product",
+            id,
+          ),
+          "catalog.product.archive",
+        );
+        const remote = await port(context, externalId);
+        const product: Product = { ...current, status: "archived", version: current.version + 1 };
+        await this.#runtime.options.store.commitResource({
+          ...commitBase(this.#runtime, "product", id, externalId),
+          value: product,
+          evidence: remote.evidence,
+        });
+        return product;
+      },
+    });
+  }
+
+  async archiveSku(id: SkuId, idempotencyKey: IdempotencyKey): Promise<Sku> {
+    const current = await this.getSku(id);
+    if (current === undefined) throw notFound("catalog.sku.archive");
+    return this.#runtime.mutate({
+      operation: "catalog.sku.archive",
+      key: idempotencyKey,
+      payload: { id },
+      decodeReplay: decodeSku,
+      execute: async () => {
+        const sku: Sku = { ...current, status: "archived", version: current.version + 1 };
+        await this.#runtime.options.store.commitResource({
+          ...commitBase(this.#runtime, "sku", id),
+          value: sku,
+        });
+        return sku;
+      },
+    });
+  }
+
+  async retirePrice(id: PriceId, idempotencyKey: IdempotencyKey): Promise<Price> {
+    const current = await this.getPrice(id);
+    if (current === undefined) throw notFound("catalog.price.retire");
+    return this.#runtime.mutate({
+      operation: "catalog.price.retire",
+      key: idempotencyKey,
+      payload: { id },
+      decodeReplay: decodePrice,
+      execute: async (context) => {
+        await this.#runtime.requireCapability("catalog.price.retire", context);
+        const port = this.#runtime.options.adapter.catalog?.retirePrice;
+        if (port === undefined) throw unsupported("catalog.price.retire");
+        const externalId = requireExternalId(
+          await this.#runtime.options.store.getExternalId(
+            this.#runtime.options.tenantId,
+            this.#runtime.options.connection.id,
+            "price",
+            id,
+          ),
+          "catalog.price.retire",
+        );
+        const remote = await port(context, externalId);
+        const price: Price = { ...current, status: "retired" };
+        await this.#runtime.options.store.commitResource({
+          ...commitBase(this.#runtime, "price", id, externalId),
           value: price,
           evidence: remote.evidence,
         });

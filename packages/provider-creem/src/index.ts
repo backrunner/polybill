@@ -1,6 +1,8 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { creemCapabilities } from "./capabilities.js";
 import { creemCheckout } from "./checkout.js";
+import { creemCustomers } from "./customers.js";
+import { creemSubscriptions } from "./subscriptions.js";
 import { creemWebhooks } from "./webhooks.js";
 
 export function createCreemAdapter(): ProviderAdapter {
@@ -12,7 +14,9 @@ export function createCreemAdapter(): ProviderAdapter {
       maturity: "experimental",
     },
     getCapabilities: async (context) => creemCapabilities(context),
+    customers: creemCustomers,
     checkout: creemCheckout,
+    subscriptions: creemSubscriptions,
     webhooks: creemWebhooks,
     reconcile: {
       async checkout(context, externalId) {

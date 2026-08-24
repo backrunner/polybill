@@ -9,7 +9,7 @@ export const LEMON_API_VERSION = "v1-jsonapi-2026-08-25";
 
 export async function lemonRequest(
   context: ProviderContext,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {

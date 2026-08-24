@@ -42,6 +42,16 @@ export const stripeCustomers: CustomerProvider = {
       ),
     );
   },
+  async tombstone(context, externalId) {
+    return stripeResult(
+      context,
+      decodeCustomer(
+        (
+          await stripeRequest(context, "DELETE", `/v1/customers/${encodeURIComponent(externalId)}`)
+        ).json(),
+      ),
+    );
+  },
   async portal(context, externalId, returnUrl) {
     const root = object(
       (

@@ -119,6 +119,9 @@ importers:
         specifier: workspace:^
         version: link:../core
     devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
@@ -148,6 +151,9 @@ importers:
         specifier: workspace:^
         version: link:../core
     devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
@@ -161,6 +167,9 @@ importers:
         specifier: workspace:^
         version: link:../core
     devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))

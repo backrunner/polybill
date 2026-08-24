@@ -37,7 +37,7 @@ export class SubscriptionService {
       decodeReplay: decodeSubscription,
       execute: async (context) => {
         await this.#runtime.requireCapability("subscription.create", context);
-        const port = this.#runtime.options.adapter.subscriptions;
+        const port = this.#runtime.options.adapter.subscriptions?.create;
         if (port === undefined) throw unsupported("subscription.create");
         const externalCustomerId = requireExternalId(
           await mapping(this.#runtime, "customer", command.customerId),
@@ -52,7 +52,7 @@ export class SubscriptionService {
             quantity: item.quantity,
           })),
         );
-        const remote = await port.create(context, {
+        const remote = await port(context, {
           externalCustomerId,
           items,
           ...(command.trial === undefined ? {} : { trial: command.trial }),
@@ -90,13 +90,13 @@ export class SubscriptionService {
       decodeReplay: decodeSubscription,
       execute: async (context) => {
         await this.#runtime.requireCapability("subscription.cancel", context);
-        const port = this.#runtime.options.adapter.subscriptions;
+        const port = this.#runtime.options.adapter.subscriptions?.cancel;
         if (port === undefined) throw unsupported("subscription.cancel");
         const externalId = requireExternalId(
           await mapping(this.#runtime, "subscription", id),
           "subscription.cancel",
         );
-        const remote = await port.cancel(context, externalId, timing);
+        const remote = await port(context, externalId, timing);
         const updated = canonical(
           id,
           current.customerId,
@@ -120,12 +120,132 @@ export class SubscriptionService {
     });
   }
 
+  async changeItems(
+    id: Subscription["id"],
+    idempotencyKey: IdempotencyKey,
+    items: readonly { readonly priceId: PriceId; readonly quantity: number }[],
+  ): Promise<Subscription> {
+    assertItems(items);
+    const current = await this.get(id);
+    if (current === undefined) throw notFound();
+    return this.#runtime.mutate({
+      operation: "subscription.change_items",
+      key: idempotencyKey,
+      payload: { id, items },
+      decodeReplay: decodeSubscription,
+      execute: async (context) => {
+        await this.#runtime.requireCapability("subscription.change_items", context);
+        const port = this.#runtime.options.adapter.subscriptions?.changeItems;
+        if (port === undefined) throw unsupported("subscription.change_items");
+        const externalId = requireExternalId(
+          await mapping(this.#runtime, "subscription", id),
+          "subscription.change_items",
+        );
+        const externalItems = await Promise.all(
+          items.map(async (item) => ({
+            externalPriceId: requireExternalId(
+              await mapping(this.#runtime, "price", item.priceId),
+              "subscription.change_items",
+            ),
+            quantity: item.quantity,
+          })),
+        );
+        const remote = await port(context, externalId, externalItems);
+        const updated = canonical(id, current.customerId, items, remote.value, current.version + 1);
+        await commit(this.#runtime, updated, externalId, remote.evidence);
+        return updated;
+      },
+    });
+  }
+
+  pause(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
+    return this.#lifecycle(id, idempotencyKey, "pause");
+  }
+
+  resume(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
+    return this.#lifecycle(id, idempotencyKey, "resume");
+  }
+
   get(id: Subscription["id"]): Promise<Subscription | undefined> {
     return this.#runtime.options.store.getResource(
       this.#runtime.options.tenantId,
       "subscription",
       id,
     );
+  }
+
+  async refresh(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
+    const current = await this.get(id);
+    if (current === undefined) throw notFound();
+    return this.#runtime.mutate({
+      operation: "subscription.refresh",
+      key: idempotencyKey,
+      payload: { id },
+      decodeReplay: decodeSubscription,
+      execute: async (context) => {
+        await this.#runtime.requireCapability("subscription.read", context);
+        const port = this.#runtime.options.adapter.subscriptions?.get;
+        if (port === undefined) throw unsupported("subscription.read");
+        const externalId = requireExternalId(
+          await mapping(this.#runtime, "subscription", id),
+          "subscription.read",
+        );
+        const remote = await port(context, externalId);
+        const items = await Promise.all(
+          remote.value.items.map(async (item) => {
+            const canonicalId = await this.#runtime.options.store.findCanonicalId(
+              this.#runtime.options.tenantId,
+              this.#runtime.options.connection.id,
+              "price",
+              item.externalPriceId,
+            );
+            return {
+              priceId: requirePriceId(canonicalId),
+              quantity: item.quantity,
+            };
+          }),
+        );
+        const updated = canonical(id, current.customerId, items, remote.value, current.version + 1);
+        await commit(this.#runtime, updated, externalId, remote.evidence);
+        return updated;
+      },
+    });
+  }
+
+  async #lifecycle(
+    id: Subscription["id"],
+    idempotencyKey: IdempotencyKey,
+    action: "pause" | "resume",
+  ): Promise<Subscription> {
+    const current = await this.get(id);
+    if (current === undefined) throw notFound();
+    const operation = `subscription.${action}` as const;
+    return this.#runtime.mutate({
+      operation,
+      key: idempotencyKey,
+      payload: { id, action },
+      decodeReplay: decodeSubscription,
+      execute: async (context) => {
+        await this.#runtime.requireCapability(operation, context);
+        const subscriptions = this.#runtime.options.adapter.subscriptions;
+        const port = action === "pause" ? subscriptions?.pause : subscriptions?.resume;
+        if (port === undefined) throw unsupported(operation);
+        const externalId = requireExternalId(
+          await mapping(this.#runtime, "subscription", id),
+          operation,
+        );
+        const remote = await port(context, externalId);
+        const updated = canonical(
+          id,
+          current.customerId,
+          current.items,
+          remote.value,
+          current.version + 1,
+        );
+        await commit(this.#runtime, updated, externalId, remote.evidence);
+        return updated;
+      },
+    });
   }
 }
 
@@ -172,6 +292,31 @@ async function mapping(runtime: ResourceRuntime, type: string, id: string) {
     id,
   );
 }
+async function commit(
+  runtime: ResourceRuntime,
+  subscription: Subscription,
+  externalId: string,
+  evidence: unknown,
+): Promise<void> {
+  await runtime.options.store.commitResource({
+    tenantId: runtime.options.tenantId,
+    connectionId: runtime.options.connection.id,
+    provider: runtime.options.connection.provider,
+    entityType: "subscription",
+    entityId: subscription.id,
+    externalId,
+    value: subscription,
+    evidence,
+    occurredAt: runtime.options.clock.now(),
+  });
+}
+function assertItems(items: readonly { readonly quantity: number }[]): void {
+  if (
+    items.length === 0 ||
+    items.some((item) => !Number.isSafeInteger(item.quantity) || item.quantity < 1)
+  )
+    throw new TypeError("Subscription items are invalid");
+}
 function decodeSubscription(value: unknown): Subscription {
   if (typeof value !== "object" || value === null || !("id" in value) || !("items" in value))
     throw new TypeError("Stored subscription replay is invalid");
@@ -190,4 +335,13 @@ function notFound() {
     operation: "subscription.get",
     retryable: false,
   });
+}
+function requirePriceId(value: string | undefined): PriceId {
+  if (value === undefined)
+    throw new PolybillError("Provider subscription item has no canonical price mapping", {
+      code: "not_found",
+      operation: "subscription.read",
+      retryable: false,
+    });
+  return parseId<"PriceId">(value, "price");
 }

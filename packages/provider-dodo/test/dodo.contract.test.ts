@@ -105,4 +105,99 @@ describe("Dodo adapter contract", () => {
     const decoded = adapter.webhooks.decode(verified);
     expect(decoded.externalIds.object).toBe("pay_123");
   });
+
+  it("maps customers, subscriptions, and authoritative full refunds", async () => {
+    const customer = {
+      customer_id: "cus_fixture",
+      email: "buyer@example.com",
+      name: "Buyer",
+    };
+    const subscription = {
+      subscription_id: "sub_fixture",
+      customer,
+      product_id: "pdt_fixture",
+      quantity: 2,
+      status: "active",
+      previous_billing_date: "2026-08-01T00:00:00.000Z",
+      next_billing_date: "2026-09-01T00:00:00.000Z",
+      cancel_at_next_billing_date: false,
+    };
+    const refund = {
+      refund_id: "ref_fixture",
+      payment_id: "pay_fixture",
+      amount: 500,
+      currency: "USD",
+      status: "succeeded",
+    };
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://test.dodopayments.com/customers",
+        response: Response.json(customer),
+      },
+      {
+        method: "POST",
+        url: "https://test.dodopayments.com/customers/cus_fixture/customer-portal/session?return_url=https%3A%2F%2Fmerchant.example%2Fbilling&send_email=false",
+        response: Response.json({ link: "https://portal.dodo.test/fixture" }),
+      },
+      {
+        method: "GET",
+        url: "https://test.dodopayments.com/subscriptions/sub_fixture",
+        response: Response.json(subscription),
+      },
+      {
+        method: "PATCH",
+        url: "https://test.dodopayments.com/subscriptions/sub_fixture",
+        response: Response.json({ ...subscription, status: "paused" }),
+      },
+      {
+        method: "PATCH",
+        url: "https://test.dodopayments.com/subscriptions/sub_fixture",
+        response: Response.json({ ...subscription, cancel_at_next_billing_date: true }),
+      },
+      {
+        method: "POST",
+        url: "https://test.dodopayments.com/refunds",
+        response: Response.json(refund),
+      },
+      {
+        method: "GET",
+        url: "https://test.dodopayments.com/refunds/ref_fixture",
+        response: Response.json(refund),
+      },
+    ]);
+    const adapter = createDodoAdapter();
+    const ctx = context(scripted.fetch);
+    await expect(
+      adapter.customers?.create?.(ctx, {
+        email: customer.email,
+        name: customer.name,
+        externalReference: parseId<"CustomerId">("cust_dodofixture", "cust"),
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ value: { externalId: customer.customer_id } });
+    await expect(
+      adapter.customers?.portal?.(ctx, customer.customer_id, "https://merchant.example/billing"),
+    ).resolves.toMatchObject({ value: { url: "https://portal.dodo.test/fixture" } });
+    await expect(
+      adapter.subscriptions?.get?.(ctx, subscription.subscription_id),
+    ).resolves.toMatchObject({
+      value: { status: "active", items: [{ externalPriceId: "pdt_fixture", quantity: 2 }] },
+    });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, subscription.subscription_id),
+    ).resolves.toMatchObject({ value: { status: "paused" } });
+    await expect(
+      adapter.subscriptions?.cancel?.(ctx, subscription.subscription_id, "period_end"),
+    ).resolves.toMatchObject({ value: { cancelAtPeriodEnd: true } });
+    await expect(
+      adapter.refunds?.create?.(ctx, { externalPaymentId: refund.payment_id, metadata: {} }),
+    ).resolves.toMatchObject({
+      value: { externalId: refund.refund_id, amount: money("500", "USD") },
+    });
+    await expect(adapter.refunds?.get?.(ctx, refund.refund_id)).resolves.toMatchObject({
+      value: { status: "succeeded" },
+    });
+    scripted.assertConsumed();
+  });
 });

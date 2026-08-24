@@ -26,7 +26,7 @@ export interface ProviderPriceSnapshot {
 }
 
 export interface CatalogProvider {
-  createProduct(
+  createProduct?(
     context: ProviderContext,
     input: {
       readonly name: string;
@@ -34,15 +34,24 @@ export interface CatalogProvider {
       readonly metadata: Readonly<Record<string, string>>;
     },
   ): Promise<ProviderOperationResult<ProviderProductSnapshot>>;
-  getProduct(
+  getProduct?(
     context: ProviderContext,
     externalId: string,
+  ): Promise<ProviderOperationResult<ProviderProductSnapshot>>;
+  updateProduct?(
+    context: ProviderContext,
+    externalId: string,
+    input: {
+      readonly name?: string;
+      readonly description?: string;
+      readonly metadata?: Readonly<Record<string, string>>;
+    },
   ): Promise<ProviderOperationResult<ProviderProductSnapshot>>;
   archiveProduct?(
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderProductSnapshot>>;
-  createPrice(
+  createPrice?(
     context: ProviderContext,
     input: {
       readonly externalProductId: string;
@@ -51,7 +60,7 @@ export interface CatalogProvider {
       readonly metadata: Readonly<Record<string, string>>;
     },
   ): Promise<ProviderOperationResult<ProviderPriceSnapshot>>;
-  getPrice(
+  getPrice?(
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderPriceSnapshot>>;
@@ -69,7 +78,7 @@ export interface ProviderCustomerSnapshot {
 }
 
 export interface CustomerProvider {
-  create(
+  create?(
     context: ProviderContext,
     input: {
       readonly email?: string;
@@ -78,7 +87,7 @@ export interface CustomerProvider {
       readonly metadata: Readonly<Record<string, string>>;
     },
   ): Promise<ProviderOperationResult<ProviderCustomerSnapshot>>;
-  get(
+  get?(
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderCustomerSnapshot>>;
@@ -90,6 +99,10 @@ export interface CustomerProvider {
       readonly name?: string;
       readonly metadata?: Readonly<Record<string, string>>;
     },
+  ): Promise<ProviderOperationResult<ProviderCustomerSnapshot>>;
+  tombstone?(
+    context: ProviderContext,
+    externalId: string,
   ): Promise<ProviderOperationResult<ProviderCustomerSnapshot>>;
   portal?(
     context: ProviderContext,
@@ -115,7 +128,7 @@ export interface ProviderSubscriptionSnapshot {
 }
 
 export interface SubscriptionProvider {
-  create(
+  create?(
     context: ProviderContext,
     input: {
       readonly externalCustomerId: string;
@@ -124,7 +137,7 @@ export interface SubscriptionProvider {
       readonly metadata: Readonly<Record<string, string>>;
     },
   ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
-  get(
+  get?(
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
@@ -141,7 +154,7 @@ export interface SubscriptionProvider {
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
-  cancel(
+  cancel?(
     context: ProviderContext,
     externalId: string,
     timing: "immediately" | "period_end",
@@ -157,7 +170,7 @@ export interface ProviderRefundSnapshot {
 }
 
 export interface RefundProvider {
-  create(
+  create?(
     context: ProviderContext,
     input: {
       readonly externalPaymentId: string;
@@ -166,7 +179,7 @@ export interface RefundProvider {
       readonly metadata: Readonly<Record<string, string>>;
     },
   ): Promise<ProviderOperationResult<ProviderRefundSnapshot>>;
-  get(
+  get?(
     context: ProviderContext,
     externalId: string,
   ): Promise<ProviderOperationResult<ProviderRefundSnapshot>>;

@@ -22,6 +22,17 @@ export function polarCapabilities(context: ProviderContext): CapabilitySnapshot 
       "checkout.discount": native,
       "checkout.tax": native,
       "payment.one_time": native,
+      "customer.read": native,
+      "customer.create": { ...native, constraints: { requiresEmail: true } },
+      "customer.update": native,
+      "customer.delete": native,
+      "customer.portal": native,
+      "subscription.read": native,
+      "subscription.cancel": native,
+      "subscription.resume": native,
+      "subscription.pause": unsupportedCapability(
+        "Polar pause requires explicit period-end timing that is not present in the canonical pause command",
+      ),
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",

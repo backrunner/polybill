@@ -1,3 +1,4 @@
+export * from "./ad-hoc-checkout.js";
 export * from "./catalog.js";
 export * from "./checkout.js";
 export * from "./customers.js";

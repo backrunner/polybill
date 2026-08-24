@@ -1,6 +1,9 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { paddleCapabilities } from "./capabilities.js";
 import { paddleCheckout } from "./checkout.js";
+import { paddleCatalog } from "./catalog.js";
+import { paddleCustomers } from "./customers.js";
+import { paddleSubscriptions } from "./subscriptions.js";
 import { paddleWebhooks } from "./webhooks.js";
 
 export function createPaddleAdapter(): ProviderAdapter {
@@ -12,7 +15,10 @@ export function createPaddleAdapter(): ProviderAdapter {
       maturity: "experimental",
     },
     getCapabilities: async (context) => paddleCapabilities(context),
+    catalog: paddleCatalog,
+    customers: paddleCustomers,
     checkout: paddleCheckout,
+    subscriptions: paddleSubscriptions,
     webhooks: paddleWebhooks,
     reconcile: {
       async checkout(context, externalId) {

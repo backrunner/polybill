@@ -184,14 +184,14 @@ describe("Stripe adapter contract", () => {
     const adapter = createStripeAdapter();
     const ctx = context(scripted.fetch);
     await expect(
-      adapter.catalog?.createProduct(ctx, {
+      adapter.catalog?.createProduct?.(ctx, {
         name: "Pro",
         description: "Pro plan",
         metadata: { source: "polybill" },
       }),
     ).resolves.toMatchObject({ value: { externalId: "prod_fixture", status: "active" } });
     await expect(
-      adapter.catalog?.createPrice(ctx, {
+      adapter.catalog?.createPrice?.(ctx, {
         externalProductId: "prod_fixture",
         model: {
           kind: "recurring",
@@ -203,7 +203,7 @@ describe("Stripe adapter contract", () => {
       }),
     ).resolves.toMatchObject({ value: { externalId: "price_fixture", status: "active" } });
     await expect(
-      adapter.customers?.create(ctx, {
+      adapter.customers?.create?.(ctx, {
         email: "buyer@example.com",
         name: "Buyer",
         externalReference: parseId<"CustomerId">("cust_fixture", "cust"),
@@ -214,14 +214,14 @@ describe("Stripe adapter contract", () => {
       adapter.customers?.portal?.(ctx, "cus_fixture", "https://merchant.example/billing"),
     ).resolves.toMatchObject({ value: { url: "https://billing.stripe.test/session" } });
     await expect(
-      adapter.subscriptions?.create(ctx, {
+      adapter.subscriptions?.create?.(ctx, {
         externalCustomerId: "cus_fixture",
         items: [{ externalPriceId: "price_fixture", quantity: 2 }],
         metadata: {},
       }),
     ).resolves.toMatchObject({ value: { externalId: "sub_fixture", status: "active" } });
     await expect(
-      adapter.refunds?.create(ctx, {
+      adapter.refunds?.create?.(ctx, {
         externalPaymentId: "pi_fixture",
         amount: money("500", "USD"),
         metadata: {},
@@ -244,7 +244,7 @@ describe("Stripe adapter contract", () => {
       return Response.json({});
     };
     await expect(
-      adapter.subscriptions?.create(context(fetch), {
+      adapter.subscriptions?.create?.(context(fetch), {
         externalCustomerId: "cus_fixture",
         items: [{ externalPriceId: "price_fixture", quantity: 1 }],
         trial: { unit: "month", count: 1 },
@@ -252,5 +252,37 @@ describe("Stripe adapter contract", () => {
       }),
     ).rejects.toMatchObject({ code: "unsupported_capability" });
     expect(calls).toBe(0);
+  });
+
+  it("updates and archives products and tombstones customers", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/products/prod_fixture",
+        response: Response.json({ id: "prod_fixture", name: "Pro Plus", active: true }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/products/prod_fixture",
+        response: Response.json({ id: "prod_fixture", name: "Pro Plus", active: false }),
+      },
+      {
+        method: "DELETE",
+        url: "https://api.stripe.com/v1/customers/cus_fixture",
+        response: Response.json({ id: "cus_fixture", deleted: true }),
+      },
+    ]);
+    const adapter = createStripeAdapter();
+    const ctx = context(scripted.fetch);
+    await expect(
+      adapter.catalog?.updateProduct?.(ctx, "prod_fixture", { name: "Pro Plus" }),
+    ).resolves.toMatchObject({ value: { name: "Pro Plus", status: "active" } });
+    await expect(adapter.catalog?.archiveProduct?.(ctx, "prod_fixture")).resolves.toMatchObject({
+      value: { status: "archived" },
+    });
+    await expect(adapter.customers?.tombstone?.(ctx, "cus_fixture")).resolves.toMatchObject({
+      value: { status: "tombstoned" },
+    });
+    scripted.assertConsumed();
   });
 });

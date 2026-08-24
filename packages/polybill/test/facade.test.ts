@@ -103,11 +103,19 @@ describe("polybill facade", () => {
       },
       taxBehavior: "exclusive",
     });
+    const updatedProduct = await client.catalog.updateProduct(product.id, {
+      idempotencyKey: parseIdempotencyKey("facade:product:update:0001"),
+      name: "Pro Plus",
+    });
+    expect(updatedProduct).toMatchObject({ name: "Pro Plus", version: 2 });
     const customer = await client.customers.create({
       idempotencyKey: parseIdempotencyKey("facade:customer:0001"),
       externalId: "host-user-123",
       email: "buyer@example.com",
     });
+    await expect(
+      client.customers.refresh(customer.id, parseIdempotencyKey("facade:customer:refresh:0001")),
+    ).resolves.toMatchObject({ email: "buyer@example.com" });
     const subscription = await client.subscriptions.create({
       idempotencyKey: parseIdempotencyKey("facade:subscription:0001"),
       customerId: customer.id,
@@ -115,6 +123,33 @@ describe("polybill facade", () => {
     });
     expect(subscription.status).toBe("active");
     expect(subscription.items).toEqual([{ priceId: createdPrice.id, quantity: 1 }]);
+    const changed = await client.subscriptions.changeItems(
+      subscription.id,
+      parseIdempotencyKey("facade:subscription:items:0001"),
+      [{ priceId: createdPrice.id, quantity: 2 }],
+    );
+    expect(changed.items).toEqual([{ priceId: createdPrice.id, quantity: 2 }]);
+    await expect(
+      client.subscriptions.pause(
+        subscription.id,
+        parseIdempotencyKey("facade:subscription:pause:0001"),
+      ),
+    ).resolves.toMatchObject({ status: "paused" });
+    await expect(
+      client.subscriptions.resume(
+        subscription.id,
+        parseIdempotencyKey("facade:subscription:resume:0001"),
+      ),
+    ).resolves.toMatchObject({ status: "active" });
+    await expect(
+      client.subscriptions.refresh(
+        subscription.id,
+        parseIdempotencyKey("facade:subscription:refresh:0001"),
+      ),
+    ).resolves.toMatchObject({
+      status: "active",
+      items: [{ priceId: createdPrice.id, quantity: 2 }],
+    });
 
     const checkout = await client.checkouts.create({
       idempotencyKey: parseIdempotencyKey("facade:resource-checkout:0001"),
@@ -140,6 +175,25 @@ describe("polybill facade", () => {
     });
     expect(refund.paymentId).toBe(checkout.payment.id);
     expect(refund.amount).toEqual(money("500", "USD"));
+    await expect(
+      client.refunds.refresh(refund.id, parseIdempotencyKey("facade:refund:refresh:0001")),
+    ).resolves.toEqual(refund);
+
+    const adHoc = await client.checkouts.createAdHoc({
+      idempotencyKey: parseIdempotencyKey("facade:adhoc:0001"),
+      items: [
+        {
+          skuId: sku.id,
+          quantity: 1,
+          price: { kind: "custom", minimum: money("500", "USD") },
+          unitAmount: money("700", "USD"),
+          persistence: "session",
+        },
+      ],
+      successUrl: "https://merchant.example/success",
+      cancelUrl: "https://merchant.example/cancel",
+    });
+    expect(adHoc.order.total).toEqual(money("700", "USD"));
 
     const licenseService = client.licenses;
     if (licenseService === undefined) throw new Error("Expected configured license service");
@@ -154,5 +208,24 @@ describe("polybill facade", () => {
       id: issued.license.id,
       ownerRef: customer.id,
     });
+
+    await expect(
+      client.customers.update(customer.id, {
+        idempotencyKey: parseIdempotencyKey("facade:customer:update:0001"),
+        name: "Updated Buyer",
+      }),
+    ).resolves.toMatchObject({ name: "Updated Buyer", status: "active" });
+    await expect(
+      client.customers.tombstone(customer.id, parseIdempotencyKey("facade:customer:delete:0001")),
+    ).resolves.toMatchObject({ status: "tombstoned" });
+    await expect(
+      client.catalog.retirePrice(createdPrice.id, parseIdempotencyKey("facade:price:retire:0001")),
+    ).resolves.toMatchObject({ status: "retired" });
+    await expect(
+      client.catalog.archiveSku(sku.id, parseIdempotencyKey("facade:sku:archive:0001")),
+    ).resolves.toMatchObject({ status: "archived" });
+    await expect(
+      client.catalog.archiveProduct(product.id, parseIdempotencyKey("facade:product:archive:0001")),
+    ).resolves.toMatchObject({ status: "archived" });
   });
 });

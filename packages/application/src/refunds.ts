@@ -32,7 +32,7 @@ export class RefundService {
       execute: async (context) => {
         const key = command.amount === undefined ? "refund.full" : "refund.partial";
         await this.#runtime.requireCapability(key, context);
-        const port = this.#runtime.options.adapter.refunds;
+        const port = this.#runtime.options.adapter.refunds?.create;
         if (port === undefined) throw unsupported();
         const externalPaymentId = requireExternalId(
           await this.#runtime.options.store.getExternalId(
@@ -43,7 +43,7 @@ export class RefundService {
           ),
           "refund.create",
         );
-        const remote = await port.create(context, {
+        const remote = await port(context, {
           externalPaymentId,
           ...(command.amount === undefined ? {} : { amount: command.amount }),
           ...(command.reason === undefined ? {} : { reason: command.reason }),
@@ -79,6 +79,59 @@ export class RefundService {
   }
   get(id: Refund["id"]): Promise<Refund | undefined> {
     return this.#runtime.options.store.getResource(this.#runtime.options.tenantId, "refund", id);
+  }
+
+  async refresh(id: Refund["id"], idempotencyKey: IdempotencyKey): Promise<Refund> {
+    const current = await this.get(id);
+    if (current === undefined)
+      throw new PolybillError("Canonical refund was not found", {
+        code: "not_found",
+        operation: "refund.refresh",
+        retryable: false,
+      });
+    return this.#runtime.mutate({
+      operation: "refund.refresh",
+      key: idempotencyKey,
+      payload: { id },
+      decodeReplay: decodeRefund,
+      execute: async (context) => {
+        const port = this.#runtime.options.adapter.refunds?.get;
+        if (port === undefined) throw unsupported();
+        const externalId = requireExternalId(
+          await this.#runtime.options.store.getExternalId(
+            this.#runtime.options.tenantId,
+            this.#runtime.options.connection.id,
+            "refund",
+            id,
+          ),
+          "refund.refresh",
+        );
+        const remote = await port(context, externalId);
+        if (remote.value.status === "unknown")
+          throw new PolybillError("Provider returned an unknown refund status", {
+            code: "provider_response_invalid",
+            operation: "refund.refresh",
+            retryable: false,
+          });
+        const refund: Refund = {
+          ...current,
+          amount: remote.value.amount,
+          status: remote.value.status,
+        };
+        await this.#runtime.options.store.commitResource({
+          tenantId: this.#runtime.options.tenantId,
+          connectionId: this.#runtime.options.connection.id,
+          provider: this.#runtime.options.connection.provider,
+          entityType: "refund",
+          entityId: id,
+          externalId,
+          value: refund,
+          evidence: remote.evidence,
+          occurredAt: this.#runtime.options.clock.now(),
+        });
+        return refund;
+      },
+    });
   }
 }
 function decodeRefund(value: unknown): Refund {

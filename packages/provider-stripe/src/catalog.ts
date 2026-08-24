@@ -34,6 +34,28 @@ export const stripeCatalog: CatalogProvider = {
       ),
     );
   },
+  async updateProduct(context, externalId, input) {
+    const body = metadata(
+      new URLSearchParams({
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.description === undefined ? {} : { description: input.description }),
+      }),
+      input.metadata ?? {},
+    );
+    return stripeResult(
+      context,
+      decodeProduct(
+        (
+          await stripeRequest(
+            context,
+            "POST",
+            `/v1/products/${encodeURIComponent(externalId)}`,
+            body,
+          )
+        ).json(),
+      ),
+    );
+  },
   async archiveProduct(context, externalId) {
     return stripeResult(
       context,

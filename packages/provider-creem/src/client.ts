@@ -9,7 +9,7 @@ export const CREEM_API_VERSION = "openapi-2026-08-25";
 
 export async function creemRequest(
   context: ProviderContext,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {

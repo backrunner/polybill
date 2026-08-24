@@ -79,9 +79,11 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         providerApiVersion: "fake-v1",
         capabilities: {
           "checkout.hosted": hosted,
+          "checkout.ad_hoc_price": nativeCapability(),
           "checkout.multi_item": multi,
           "catalog.product.read": nativeCapability(),
           "catalog.product.create": nativeCapability(),
+          "catalog.product.update": nativeCapability(),
           "catalog.product.archive": nativeCapability(),
           "catalog.price.read": nativeCapability(),
           "catalog.price.create": nativeCapability(),
@@ -89,9 +91,13 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
           "customer.read": nativeCapability(),
           "customer.create": nativeCapability(),
           "customer.update": nativeCapability(),
+          "customer.delete": nativeCapability(),
           "customer.portal": nativeCapability(),
           "subscription.create": nativeCapability(),
           "subscription.read": nativeCapability(),
+          "subscription.change_items": nativeCapability(),
+          "subscription.pause": nativeCapability(),
+          "subscription.resume": nativeCapability(),
           "subscription.cancel": nativeCapability(),
           "refund.partial": nativeCapability(),
           "refund.full": nativeCapability(),
@@ -122,6 +128,16 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       },
       async getProduct(context, externalId) {
         return result(context, required(products, externalId));
+      },
+      async updateProduct(context, externalId, input) {
+        const current = required(products, externalId);
+        const value = {
+          ...current,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.description === undefined ? {} : { description: input.description }),
+        };
+        products.set(externalId, value);
+        return result(context, value);
       },
       async archiveProduct(context, externalId) {
         const value = { ...required(products, externalId), status: "archived" as const };
@@ -165,6 +181,11 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       async update(context, externalId, input) {
         const current = required(customers, externalId);
         const value = { ...current, ...input };
+        customers.set(externalId, value);
+        return result(context, value);
+      },
+      async tombstone(context, externalId) {
+        const value = { ...required(customers, externalId), status: "tombstoned" as const };
         customers.set(externalId, value);
         return result(context, value);
       },
@@ -231,6 +252,29 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       },
       async get(context, externalId) {
         return result(context, required(subscriptions, externalId));
+      },
+      async changeItems(context, externalId, items) {
+        const value = { ...required(subscriptions, externalId), items };
+        subscriptions.set(externalId, value);
+        return result(context, value);
+      },
+      async pause(context, externalId) {
+        const value: ProviderSubscriptionSnapshot = {
+          ...required(subscriptions, externalId),
+          status: "paused",
+          rawStatus: "paused",
+        };
+        subscriptions.set(externalId, value);
+        return result(context, value);
+      },
+      async resume(context, externalId) {
+        const value: ProviderSubscriptionSnapshot = {
+          ...required(subscriptions, externalId),
+          status: "active",
+          rawStatus: "active",
+        };
+        subscriptions.set(externalId, value);
+        return result(context, value);
       },
       async cancel(context, externalId, timing) {
         const current = required(subscriptions, externalId);

@@ -9,7 +9,7 @@ export const PADDLE_API_VERSION = "1";
 
 export async function paddleRequest(
   context: ProviderContext,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {

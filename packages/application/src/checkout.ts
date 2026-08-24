@@ -31,6 +31,7 @@ import {
   type TenantId,
 } from "@polybill/core";
 import {
+  assertCheckoutItems,
   fixedUnitAmount,
   invalidCheckout,
   parseStoredCheckoutResult,
@@ -39,6 +40,7 @@ import {
   validatedRedirectUrl,
 } from "./checkout-helpers.js";
 import type { ApplicationStore, IdGenerator, Logger } from "./ports.js";
+import { AdHocCheckoutService, type CreateAdHocCheckoutCommand } from "./ad-hoc-checkout.js";
 
 export interface CreateCheckoutItem {
   readonly priceId: string;
@@ -80,6 +82,7 @@ export interface CheckoutServiceOptions {
 
 export class CheckoutService {
   readonly #options: CheckoutServiceOptions;
+  readonly #adHoc: AdHocCheckoutService;
 
   constructor(options: CheckoutServiceOptions) {
     if (options.connection.tenantId !== options.tenantId) {
@@ -90,10 +93,11 @@ export class CheckoutService {
       });
     }
     this.#options = options;
+    this.#adHoc = new AdHocCheckoutService(options);
   }
 
   async create(command: CreateCheckoutCommand): Promise<CreateCheckoutResult> {
-    assertCheckoutInput(command);
+    assertCheckoutItems(command.items);
     validatedRedirectUrl(command.successUrl);
     validatedRedirectUrl(command.cancelUrl);
     const context = await this.#context(command.idempotencyKey);
@@ -172,8 +176,12 @@ export class CheckoutService {
     }
   }
 
+  async createAdHoc(command: CreateAdHocCheckoutCommand): Promise<CreateCheckoutResult> {
+    return this.#adHoc.create(command);
+  }
+
   async #prepare(command: CreateCheckoutCommand): Promise<PreparedCheckout> {
-    assertCheckoutInput(command);
+    assertCheckoutItems(command.items);
     const lines: ProviderCheckoutCommand["lines"][number][] = [];
     let total: Money | undefined;
     for (const item of command.items) {
@@ -375,16 +383,6 @@ interface PreparedCheckout {
   readonly paymentId: PaymentId;
   readonly lines: ProviderCheckoutCommand["lines"];
   readonly providerCommand: ProviderCheckoutCommand;
-}
-
-function assertCheckoutInput(command: CreateCheckoutCommand): void {
-  if (command.items.length === 0)
-    throw invalidCheckout("Checkout must include at least one line item");
-  for (const item of command.items) {
-    if (!Number.isSafeInteger(item.quantity) || item.quantity < 1) {
-      throw invalidCheckout("Checkout quantities must be positive safe integers");
-    }
-  }
 }
 
 function unsupported(

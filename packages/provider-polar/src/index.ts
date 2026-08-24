@@ -1,6 +1,8 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { polarCapabilities } from "./capabilities.js";
 import { polarCheckout } from "./checkout.js";
+import { polarCustomers } from "./customers.js";
+import { polarSubscriptions } from "./subscriptions.js";
 import { polarWebhooks } from "./webhooks.js";
 
 export function createPolarAdapter(): ProviderAdapter {
@@ -12,7 +14,9 @@ export function createPolarAdapter(): ProviderAdapter {
       maturity: "experimental",
     },
     getCapabilities: async (context) => polarCapabilities(context),
+    customers: polarCustomers,
     checkout: polarCheckout,
+    subscriptions: polarSubscriptions,
     webhooks: polarWebhooks,
     reconcile: {
       async checkout(context, externalId) {

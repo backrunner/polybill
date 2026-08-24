@@ -9,7 +9,7 @@ export const DODO_API_VERSION = "1.113.6";
 
 export async function dodoRequest(
   context: ProviderContext,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {

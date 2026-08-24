@@ -37,6 +37,15 @@ export function invalidCheckout(message: string): PolybillError {
   });
 }
 
+export function assertCheckoutItems(items: readonly { readonly quantity: number }[]): void {
+  if (items.length === 0) throw invalidCheckout("Checkout must include at least one line item");
+  for (const item of items) {
+    if (!Number.isSafeInteger(item.quantity) || item.quantity < 1) {
+      throw invalidCheckout("Checkout quantities must be positive safe integers");
+    }
+  }
+}
+
 export function stableStringify(value: unknown): string {
   if (value === undefined) return "null";
   if (value === null || typeof value !== "object") return JSON.stringify(value);

@@ -98,7 +98,10 @@ function timestamp(value: unknown, key: "currentPeriodStart" | "currentPeriodEnd
     : {};
 }
 
-function unsupported(context: Parameters<SubscriptionProvider["create"]>[0], message: string) {
+function unsupported(
+  context: Parameters<NonNullable<SubscriptionProvider["create"]>>[0],
+  message: string,
+) {
   return new PolybillError(message, {
     code: "unsupported_capability",
     operation: "stripe.subscription.create",

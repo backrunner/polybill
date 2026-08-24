@@ -1,6 +1,8 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { lemonCapabilities } from "./capabilities.js";
 import { lemonCheckout } from "./checkout.js";
+import { lemonCustomers } from "./customers.js";
+import { lemonSubscriptions } from "./subscriptions.js";
 import { lemonWebhooks } from "./webhooks.js";
 
 export function createLemonSqueezyAdapter(): ProviderAdapter {
@@ -12,7 +14,9 @@ export function createLemonSqueezyAdapter(): ProviderAdapter {
       maturity: "experimental",
     },
     getCapabilities: async (context) => lemonCapabilities(context),
+    customers: lemonCustomers,
     checkout: lemonCheckout,
+    subscriptions: lemonSubscriptions,
     webhooks: lemonWebhooks,
     reconcile: {
       async checkout(context, externalId) {

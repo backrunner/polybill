@@ -9,7 +9,7 @@ export const POLAR_API_VERSION = "2026-04";
 
 export async function polarRequest(
   context: ProviderContext,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {

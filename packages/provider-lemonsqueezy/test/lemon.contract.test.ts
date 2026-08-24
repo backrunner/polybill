@@ -1,5 +1,6 @@
-import { hmacSha256, utf8 } from "@polybill/adapter-kit";
-import { parseIsoDateTime } from "@polybill/core";
+import { createWebCryptoPort, hmacSha256, utf8 } from "@polybill/adapter-kit";
+import { parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
+import { createScriptedFetch, VirtualClock } from "@polybill/testing";
 import { describe, expect, it } from "vitest";
 import { createLemonSqueezyAdapter } from "../src/index.js";
 
@@ -22,7 +23,118 @@ describe("Lemon Squeezy webhook contract", () => {
     expect(first.deliveryKey).toMatch(/^lemonSqueezy:[0-9a-f]{64}$/);
     expect(second.deliveryKey).toBe(first.deliveryKey);
   });
+
+  it("maps JSON:API customer and subscription lifecycle resources", async () => {
+    const customer = jsonApi("customers", "42", {
+      email: "buyer@example.com",
+      name: "Buyer",
+      urls: { customer_portal: "https://app.lemonsqueezy.com/my-orders/fixture" },
+    });
+    const subscription = jsonApi("subscriptions", "84", {
+      customer_id: 42,
+      variant_id: 21,
+      variant_quantity: 2,
+      status: "active",
+      renews_at: "2026-09-01T00:00:00.000Z",
+      ends_at: null,
+    });
+    const scripted = createScriptedFetch([
+      {
+        method: "GET",
+        url: "https://api.lemonsqueezy.com/v1/customers/42",
+        response: Response.json(customer),
+      },
+      {
+        method: "PATCH",
+        url: "https://api.lemonsqueezy.com/v1/customers/42",
+        response: Response.json(
+          jsonApi("customers", "42", { ...customer.data.attributes, name: "Updated" }),
+        ),
+      },
+      {
+        method: "GET",
+        url: "https://api.lemonsqueezy.com/v1/customers/42",
+        response: Response.json(customer),
+      },
+      {
+        method: "GET",
+        url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
+        response: Response.json(subscription),
+      },
+      {
+        method: "PATCH",
+        url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
+        response: Response.json(
+          jsonApi("subscriptions", "84", { ...subscription.data.attributes, status: "paused" }),
+        ),
+      },
+      {
+        method: "PATCH",
+        url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
+        response: Response.json(subscription),
+      },
+      {
+        method: "DELETE",
+        url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
+        response: Response.json(
+          jsonApi("subscriptions", "84", {
+            ...subscription.data.attributes,
+            status: "cancelled",
+            ends_at: "2026-09-01T00:00:00.000Z",
+          }),
+        ),
+      },
+    ]);
+    const adapter = createLemonSqueezyAdapter();
+    const ctx = context(scripted.fetch);
+    await expect(adapter.customers?.get?.(ctx, "42")).resolves.toMatchObject({
+      value: { email: "buyer@example.com" },
+    });
+    await expect(
+      adapter.customers?.update?.(ctx, "42", { name: "Updated" }),
+    ).resolves.toMatchObject({ value: { name: "Updated" } });
+    await expect(
+      adapter.customers?.portal?.(ctx, "42", "https://merchant.example/billing"),
+    ).resolves.toMatchObject({ value: { url: "https://app.lemonsqueezy.com/my-orders/fixture" } });
+    await expect(adapter.subscriptions?.get?.(ctx, "84")).resolves.toMatchObject({
+      value: { status: "active", items: [{ externalPriceId: "21", quantity: 2 }] },
+    });
+    await expect(adapter.subscriptions?.pause?.(ctx, "84")).resolves.toMatchObject({
+      value: { status: "paused" },
+    });
+    await expect(adapter.subscriptions?.resume?.(ctx, "84")).resolves.toMatchObject({
+      value: { status: "active" },
+    });
+    await expect(adapter.subscriptions?.cancel?.(ctx, "84", "period_end")).resolves.toMatchObject({
+      value: { status: "active", cancelAtPeriodEnd: true },
+    });
+    scripted.assertConsumed();
+  });
 });
+
+function context(fetch: typeof globalThis.fetch) {
+  const tenantId = parseId<"TenantId">("ten_lemonfixture", "ten");
+  return {
+    tenantId,
+    connection: {
+      id: parseId<"ConnectionId">("conn_lemonfixture", "conn"),
+      tenantId,
+      provider: "lemonSqueezy" as const,
+      environment: "test" as const,
+    },
+    credentials: { apiKey: "lemon_fixture_key" },
+    requestId: parseId<"RequestId">("req_lemonfixture", "req"),
+    idempotencyKey: parseIdempotencyKey("lemon-resource-fixture"),
+    deadline: parseIsoDateTime("2026-08-25T00:01:00.000Z"),
+    fetch,
+    crypto: createWebCryptoPort(),
+    clock: new VirtualClock("2026-08-25T00:00:00.000Z"),
+  } as const;
+}
+
+function jsonApi(type: string, id: string, attributes: Readonly<Record<string, unknown>>) {
+  return { data: { type, id, attributes } };
+}
 
 function hex(value: Uint8Array): string {
   return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
