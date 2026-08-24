@@ -69,6 +69,7 @@ export function createWebhookHandler(
         rawBody: body,
         headers: request.headers,
         secret: resolved.secret,
+        environment: resolved.connection.environment,
         now,
       });
     } catch (error) {

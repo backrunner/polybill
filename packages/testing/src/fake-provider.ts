@@ -114,7 +114,8 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         if (found === undefined) throw new Error("Fake checkout not found");
         return result(context, found);
       },
-      async recoverByIdempotencyKey(context, key) {
+      async recoverByIdempotencyKey(context, key, command) {
+        void command;
         const found = byKey.get(key);
         return found === undefined ? undefined : result(context, found);
       },
@@ -123,7 +124,7 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       async verify(input): Promise<VerifiedProviderEvent> {
         return {
           provider: "fake",
-          environment: "test",
+          environment: input.environment,
           deliveryKey: `fake:${input.rawBody.byteLength}`,
           rawBody: input.rawBody,
           verifiedAt: input.now,

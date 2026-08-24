@@ -91,6 +91,109 @@ importers:
         specifier: workspace:^
         version: link:../testing
 
+  packages/provider-creem:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+
+  packages/provider-dodo:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
+
+  packages/provider-lemonsqueezy:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+
+  packages/provider-paddle:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+
+  packages/provider-polar:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
+
+  packages/provider-stripe:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
+
+  packages/provider-waffo:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+
+  packages/provider-x402:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+      x402-paysdk:
+        specifier: 0.1.0
+        version: 0.1.0
+    devDependencies:
+      '@polybill/testing':
+        specifier: workspace:^
+        version: link:../testing
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
+
   packages/store-d1:
     dependencies:
       '@polybill/core':
@@ -287,6 +390,14 @@ packages:
   '@manypkg/tools@2.1.2':
     resolution: {integrity: sha512-6QEf6yqFbETdwGITKq57aYoPfX/3K8XFNwsAlx0C1M7o8cb79sv1M3w+tWuWvIcSbNqrLF7OD7YpZMVVz335hQ==, tarball: https://registry.npmjs.org/@manypkg/tools/-/tools-2.1.2.tgz}
     engines: {node: '>=20.0.0'}
+
+  '@noble/curves@2.3.0':
+    resolution: {integrity: sha512-v7cY+4oWYPQszRj6ZFGzTVL7uP2TaLo1xMhWHzYC5wj0ZhOXQ5x+sBre8rF3hi8cAoi0bh1qXoovoOkdFtvqEg==, tarball: https://registry.npmjs.org/@noble/curves/-/curves-2.3.0.tgz}
+    engines: {node: '>= 20.19.0'}
+
+  '@noble/hashes@2.3.0':
+    resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==, tarball: https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-project/types@0.146.0':
     resolution: {integrity: sha512-XC0QsnnhVe7sLIWmYmdPw7x5P0h4W8vUU3Nv1ySgWXtvCz8NizoAEpGXA0sOYoJQV2Rl13LgURAHQ5cI5ILCSA==, tarball: https://registry.npmjs.org/@oxc-project/types/-/types-0.146.0.tgz}
@@ -1144,6 +1255,10 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==, tarball: https://registry.npmjs.org/word-wrap/-/word-wrap-1.2.5.tgz}
     engines: {node: '>=0.10.0'}
 
+  x402-paysdk@0.1.0:
+    resolution: {integrity: sha512-qe60Z6f/JQ5wmzbBrQ7Jw1wJOyowBD83vz1CiHIZK6xq3aqiPM41Dw+SfuqCI7OGuQveSBdu1HJgbjJiquQDvw==, tarball: https://registry.npmjs.org/x402-paysdk/-/x402-paysdk-0.1.0.tgz}
+    engines: {node: '>=20'}
+
   yaml@2.9.0:
     resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==, tarball: https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz}
     engines: {node: '>= 14.6'}
@@ -1349,6 +1464,12 @@ snapshots:
       jju: 1.4.0
       tinyglobby: 0.2.17
       yaml: 2.9.0
+
+  '@noble/curves@2.3.0':
+    dependencies:
+      '@noble/hashes': 2.3.0
+
+  '@noble/hashes@2.3.0': {}
 
   '@oxc-project/types@0.146.0': {}
 
@@ -2067,6 +2188,11 @@ snapshots:
       stackback: 0.0.2
 
   word-wrap@1.2.5: {}
+
+  x402-paysdk@0.1.0:
+    dependencies:
+      '@noble/curves': 2.3.0
+      '@noble/hashes': 2.3.0
 
   yaml@2.9.0: {}
 

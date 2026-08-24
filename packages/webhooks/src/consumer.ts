@@ -1,9 +1,10 @@
-import type { ProviderAdapter } from "@polybill/adapter-kit";
+import type { MappingLookup, ProviderAdapter } from "@polybill/adapter-kit";
 import type { InboxRecord, WebhookInboxStore } from "./ports.js";
 
 export interface WebhookConsumerOptions {
   readonly adapters: ReadonlyMap<string, ProviderAdapter>;
   readonly inbox: WebhookInboxStore;
+  readonly lookup?: MappingLookup;
 }
 
 export function createWebhookConsumer(
@@ -19,7 +20,12 @@ export function createWebhookConsumer(
     }
     try {
       const decoded = adapter.webhooks.decode(record.verified);
-      const events = await adapter.webhooks.map(decoded);
+      const events = await adapter.webhooks.map(decoded, {
+        tenantId: record.tenantId,
+        connection: record.connection,
+        observedAt: record.receivedAt,
+        lookup: options.lookup ?? emptyLookup,
+      });
       await options.inbox.markApplied(record, events);
     } catch (error) {
       const errorCode = error instanceof Error ? error.name : "unknown_error";
@@ -28,3 +34,7 @@ export function createWebhookConsumer(
     }
   };
 }
+
+const emptyLookup: MappingLookup = {
+  findCanonicalId: async () => undefined,
+};

@@ -34,9 +34,7 @@ export class LicenseService {
     this.#options = options;
   }
 
-  async issue(
-    command: IssueLicenseCommand,
-  ): Promise<{
+  async issue(command: IssueLicenseCommand): Promise<{
     readonly license: LicenseRecord;
     readonly key: string;
     readonly replayed: boolean;

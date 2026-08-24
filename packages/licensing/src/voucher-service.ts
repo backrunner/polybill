@@ -32,9 +32,7 @@ export class VoucherService {
     this.#options = options;
   }
 
-  async createBatch(
-    command: CreateVoucherBatchCommand,
-  ): Promise<{
+  async createBatch(command: CreateVoucherBatchCommand): Promise<{
     readonly batch: VoucherBatch;
     readonly codes: readonly string[];
     readonly replayed: boolean;

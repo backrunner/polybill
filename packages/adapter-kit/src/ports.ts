@@ -9,9 +9,16 @@ import type {
   PriceModel,
   ProviderName,
   SkuId,
+  TenantId,
 } from "@polybill/core";
 import type { CapabilitySnapshot } from "./capabilities.js";
 import type { ProviderContext } from "./context.js";
+import type {
+  CatalogProvider,
+  CustomerProvider,
+  RefundProvider,
+  SubscriptionProvider,
+} from "./resource-ports.js";
 
 export interface ProviderDescriptor {
   readonly name: ProviderName;
@@ -80,6 +87,7 @@ export interface CheckoutProvider {
   recoverByIdempotencyKey?(
     context: ProviderContext,
     key: string,
+    command: ProviderCheckoutCommand,
   ): Promise<ProviderOperationResult<ProviderCheckoutSnapshot> | undefined>;
 }
 
@@ -100,6 +108,22 @@ export interface DecodedProviderEvent {
   readonly payload: unknown;
 }
 
+export interface MappingLookup {
+  findCanonicalId(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: ProviderContext["connection"]["id"];
+    readonly entityType: string;
+    readonly externalId: string;
+  }): Promise<string | undefined>;
+}
+
+export interface WebhookMapContext {
+  readonly tenantId: TenantId;
+  readonly connection: ProviderContext["connection"];
+  readonly observedAt: IsoDateTime;
+  readonly lookup: MappingLookup;
+}
+
 export interface ResolvedWebhookSecret {
   readonly active: string;
   readonly activeKeyId: string;
@@ -112,10 +136,14 @@ export interface WebhookProvider {
     readonly rawBody: Uint8Array;
     readonly headers: Headers;
     readonly secret: ResolvedWebhookSecret;
+    readonly environment: Environment;
     readonly now: IsoDateTime;
   }): Promise<VerifiedProviderEvent>;
   decode(event: VerifiedProviderEvent): DecodedProviderEvent;
-  map(event: DecodedProviderEvent): Promise<readonly CanonicalBillingEvent[]>;
+  map(
+    event: DecodedProviderEvent,
+    context: WebhookMapContext,
+  ): Promise<readonly CanonicalBillingEvent[]>;
 }
 
 export interface ReconcileDifference {
@@ -137,7 +165,11 @@ export interface ReconcileProvider {
 export interface ProviderAdapter {
   readonly descriptor: ProviderDescriptor;
   getCapabilities(context: ProviderContext): Promise<CapabilitySnapshot>;
+  readonly catalog?: CatalogProvider;
+  readonly customers?: CustomerProvider;
   readonly checkout?: CheckoutProvider;
+  readonly subscriptions?: SubscriptionProvider;
+  readonly refunds?: RefundProvider;
   readonly webhooks: WebhookProvider;
   readonly reconcile: ReconcileProvider;
 }

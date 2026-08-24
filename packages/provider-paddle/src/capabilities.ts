@@ -1,0 +1,49 @@
+import {
+  nativeCapability,
+  unsupportedCapability,
+  type CapabilitySnapshot,
+  type ProviderContext,
+} from "@polybill/adapter-kit";
+import { parseId } from "@polybill/core";
+import { PADDLE_API_VERSION } from "./client.js";
+
+export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot {
+  const native = nativeCapability();
+  return {
+    provider: "paddle",
+    adapterVersion: "0.1.0",
+    providerApiVersion: PADDLE_API_VERSION,
+    capabilities: {
+      "checkout.hosted": {
+        ...native,
+        constraints: { redirectConfiguration: "application_or_paddle_js" },
+      },
+      "checkout.ad_hoc_price": native,
+      "checkout.multi_item": native,
+      "checkout.tax": native,
+      "payment.one_time": native,
+      "webhook.verify": native,
+      "license.issue": {
+        support: "emulated",
+        fidelity: "exact",
+        strategy: "polybill_control_plane",
+        environments: ["test", "live"],
+        constraints: {},
+        migration: "portable",
+      },
+      "migration.payment_method": unsupportedCapability(
+        "Paddle Billing does not expose generic saved-card portability",
+      ),
+    },
+    commercialTerms: {
+      model: "merchant_of_record",
+      sellerOfRecord: "provider",
+      taxCalculation: "provider",
+      taxInvoiceIssuer: "provider",
+      disputeResponsibility: "provider",
+      observedAt: context.clock.now(),
+      evidenceRef: parseId<"EvidenceId">("evi_paddle_terms", "evi"),
+    },
+    observedAt: context.clock.now(),
+  };
+}

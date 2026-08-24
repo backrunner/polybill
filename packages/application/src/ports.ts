@@ -45,6 +45,15 @@ export interface CatalogReader {
   getPrice(tenantId: TenantId, priceId: string): Promise<Price | undefined>;
 }
 
+export interface MappingReader {
+  getExternalId(
+    tenantId: TenantId,
+    connectionId: ConnectionId,
+    entityType: string,
+    entityId: string,
+  ): Promise<string | undefined>;
+}
+
 export interface CheckoutCommit {
   readonly tenantId: TenantId;
   readonly connectionId: ConnectionId;
@@ -62,7 +71,8 @@ export interface CheckoutStore {
   getCheckout(tenantId: TenantId, checkoutId: string): Promise<CheckoutSession | undefined>;
 }
 
-export interface ApplicationStore extends IdempotencyStore, CatalogReader, CheckoutStore {}
+export interface ApplicationStore
+  extends IdempotencyStore, CatalogReader, MappingReader, CheckoutStore {}
 
 export interface IdGenerator {
   next(prefix: string): string;

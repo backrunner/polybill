@@ -145,6 +145,7 @@ export class CheckoutService {
         const recovered = await checkoutPort.recoverByIdempotencyKey(
           context,
           command.idempotencyKey,
+          prepared.providerCommand,
         );
         if (recovered === undefined) {
           throw new PolybillError("Provider has not exposed the checkout outcome yet", {
@@ -187,7 +188,19 @@ export class CheckoutService {
       const unitAmount = fixedUnitAmount(price.model);
       const subtotal = multiplyMoney(unitAmount, item.quantity);
       total = total === undefined ? subtotal : addMoney(total, subtotal);
-      lines.push({ skuId: price.skuId, quantity: item.quantity, price: price.model, unitAmount });
+      const externalPriceId = await this.#options.store.getExternalId(
+        this.#options.tenantId,
+        this.#options.connection.id,
+        "price",
+        price.id,
+      );
+      lines.push({
+        skuId: price.skuId,
+        quantity: item.quantity,
+        price: price.model,
+        unitAmount,
+        ...(externalPriceId === undefined ? {} : { externalPriceId }),
+      });
     }
     if (total === undefined) throw invalidCheckout("Checkout must include at least one line item");
     const orderId = parseId<"OrderId">(this.#options.ids.next("ord"), "ord");

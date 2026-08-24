@@ -19,11 +19,22 @@ export class MemoryStore implements ApplicationStore {
   readonly #idempotency = new Map<string, IdempotencyRecord>();
   readonly #prices = new Map<string, Price>();
   readonly #checkouts = new Map<string, CheckoutSession>();
+  readonly #mappings = new Map<string, string>();
   readonly #commits: CheckoutCommit[] = [];
   #leaseSequence = 0;
 
   seedPrice(tenantId: TenantId, price: Price): void {
     this.#prices.set(`${tenantId}:${price.id}`, globalThis.structuredClone(price));
+  }
+
+  seedMapping(
+    tenantId: TenantId,
+    connectionId: string,
+    entityType: string,
+    entityId: string,
+    externalId: string,
+  ): void {
+    this.#mappings.set(`${tenantId}:${connectionId}:${entityType}:${entityId}`, externalId);
   }
 
   get commits(): readonly CheckoutCommit[] {
@@ -81,6 +92,15 @@ export class MemoryStore implements ApplicationStore {
   async getPrice(tenantId: TenantId, priceId: string): Promise<Price | undefined> {
     const value = this.#prices.get(`${tenantId}:${priceId}`);
     return value === undefined ? undefined : globalThis.structuredClone(value);
+  }
+
+  async getExternalId(
+    tenantId: TenantId,
+    connectionId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<string | undefined> {
+    return this.#mappings.get(`${tenantId}:${connectionId}:${entityType}:${entityId}`);
   }
 
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
