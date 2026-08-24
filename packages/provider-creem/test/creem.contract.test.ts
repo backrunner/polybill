@@ -5,6 +5,17 @@ import { describe, expect, it } from "vitest";
 import { createCreemAdapter } from "../src/index.js";
 
 describe("Creem webhook contract", () => {
+  it("reports refund creation as unsupported without canonical read-back", async () => {
+    const adapter = createCreemAdapter();
+    const capabilities = await adapter.getCapabilities(context(globalThis.fetch));
+    expect(capabilities.capabilities["refund.full"]).toMatchObject({
+      support: "unsupported",
+    });
+    expect(capabilities.capabilities["refund.partial"]).toMatchObject({
+      support: "unsupported",
+    });
+  });
+
   it("verifies raw-body HMAC and rejects JSON reserialization", async () => {
     const body =
       '{"id":"evt_fixture","eventType":"checkout.completed","object":{"id":"ch_fixture"}}';

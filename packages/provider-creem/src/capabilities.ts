@@ -34,6 +34,10 @@ export function creemCapabilities(context: ProviderContext): CapabilitySnapshot 
         constraints: { timing: ["immediately"], invoiceBehavior: ["stop_billing"] },
       },
       "subscription.resume": native,
+      "refund.full": unsupportedCapability(
+        "Creem refund creation does not return a canonical refund ID, amount, and currency for safe read-back",
+      ),
+      "refund.partial": unsupportedCapability("Creem public refund API only supports full refunds"),
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",
