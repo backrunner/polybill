@@ -185,7 +185,16 @@ describe("Dodo adapter contract", () => {
       value: { status: "active", items: [{ externalPriceId: "pdt_fixture", quantity: 2 }] },
     });
     await expect(
-      adapter.subscriptions?.pause?.(ctx, subscription.subscription_id),
+      adapter.subscriptions?.pause?.(ctx, subscription.subscription_id, {
+        timing: "period_end",
+        invoiceBehavior: "stop_billing",
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, subscription.subscription_id, {
+        timing: "immediately",
+        invoiceBehavior: "stop_billing",
+      }),
     ).resolves.toMatchObject({ value: { status: "paused" } });
     await expect(
       adapter.subscriptions?.cancel?.(ctx, subscription.subscription_id, "period_end"),

@@ -5,7 +5,13 @@ import {
   type ProviderSubscriptionSnapshot,
   type SubscriptionProvider,
 } from "@polybill/adapter-kit";
-import { PolybillError, parseIsoDateTime, type SubscriptionStatus } from "@polybill/core";
+import {
+  PolybillError,
+  parseIsoDateTime,
+  type ConnectionId,
+  type SubscriptionPausePolicy,
+  type SubscriptionStatus,
+} from "@polybill/core";
 import { lemonRequest } from "./client.js";
 import { lemonResult } from "./result.js";
 
@@ -16,7 +22,8 @@ export const lemonSubscriptions: SubscriptionProvider = {
       decode((await lemonRequest(context, "GET", path(externalId))).json()),
     );
   },
-  async pause(context, externalId) {
+  async pause(context, externalId, policy) {
+    assertPausePolicy(context.connection.id, policy);
     return update(context, externalId, { pause: { mode: "void" } });
   },
   async resume(context, externalId) {
@@ -37,6 +44,17 @@ export const lemonSubscriptions: SubscriptionProvider = {
     );
   },
 };
+
+function assertPausePolicy(connectionId: ConnectionId, policy: SubscriptionPausePolicy): void {
+  if (policy.timing !== "immediately" || policy.invoiceBehavior !== "void")
+    throw new PolybillError("Lemon Squeezy only supports an immediate void-invoice pause", {
+      code: "unsupported_capability",
+      operation: "lemonSqueezy.subscription.pause",
+      provider: "lemonSqueezy",
+      connectionId,
+      retryable: false,
+    });
+}
 
 async function update(
   context: Parameters<NonNullable<SubscriptionProvider["get"]>>[0],

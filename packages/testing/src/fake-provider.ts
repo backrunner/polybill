@@ -253,8 +253,8 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       async get(context, externalId) {
         return result(context, required(subscriptions, externalId));
       },
-      async changeItems(context, externalId, items) {
-        const value = { ...required(subscriptions, externalId), items };
+      async changeItems(context, externalId, input) {
+        const value = { ...required(subscriptions, externalId), items: input.items };
         subscriptions.set(externalId, value);
         return result(context, value);
       },

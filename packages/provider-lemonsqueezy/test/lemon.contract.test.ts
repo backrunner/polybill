@@ -99,9 +99,18 @@ describe("Lemon Squeezy webhook contract", () => {
     await expect(adapter.subscriptions?.get?.(ctx, "84")).resolves.toMatchObject({
       value: { status: "active", items: [{ externalPriceId: "21", quantity: 2 }] },
     });
-    await expect(adapter.subscriptions?.pause?.(ctx, "84")).resolves.toMatchObject({
-      value: { status: "paused" },
-    });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, "84", {
+        timing: "period_end",
+        invoiceBehavior: "void",
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, "84", {
+        timing: "immediately",
+        invoiceBehavior: "void",
+      }),
+    ).resolves.toMatchObject({ value: { status: "paused" } });
     await expect(adapter.subscriptions?.resume?.(ctx, "84")).resolves.toMatchObject({
       value: { status: "active" },
     });

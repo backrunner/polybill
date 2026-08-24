@@ -24,7 +24,7 @@ export function lemonCapabilities(context: ProviderContext): CapabilitySnapshot 
       "subscription.read": native,
       "subscription.pause": {
         ...native,
-        constraints: { mode: "void" },
+        constraints: { timing: ["immediately"], invoiceBehavior: ["void"] },
       },
       "subscription.resume": native,
       "subscription.cancel": {

@@ -32,6 +32,22 @@ export function stripeCapabilities(context: ProviderContext): CapabilitySnapshot
       "customer.portal": native,
       "subscription.create": native,
       "subscription.read": native,
+      "subscription.change_items": {
+        ...native,
+        constraints: {
+          timing: ["immediately"],
+          proration: ["none", "prorate_next_invoice", "prorate_immediately"],
+        },
+      },
+      "subscription.proration": native,
+      "subscription.pause": {
+        ...native,
+        constraints: {
+          timing: ["immediately"],
+          invoiceBehavior: ["void", "keep_draft", "mark_uncollectible"],
+        },
+      },
+      "subscription.resume": native,
       "subscription.cancel": native,
       "subscription.trial": unsupportedCapability(
         "Canonical intervals need an explicit conversion policy before using Stripe trial_period_days",

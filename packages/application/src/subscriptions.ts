@@ -1,10 +1,13 @@
 import {
   PolybillError,
+  assertSubscriptionItemChangePolicy,
   parseId,
   type CustomerId,
   type IdempotencyKey,
   type PriceId,
   type Subscription,
+  type SubscriptionItemChangePolicy,
+  type SubscriptionPausePolicy,
   type SubscriptionStatus,
 } from "@polybill/core";
 import { requireExternalId } from "./resource-runtime.js";
@@ -124,14 +127,16 @@ export class SubscriptionService {
     id: Subscription["id"],
     idempotencyKey: IdempotencyKey,
     items: readonly { readonly priceId: PriceId; readonly quantity: number }[],
+    policy: SubscriptionItemChangePolicy,
   ): Promise<Subscription> {
     assertItems(items);
+    assertSubscriptionItemChangePolicy(policy);
     const current = await this.get(id);
     if (current === undefined) throw notFound();
     return this.#runtime.mutate({
       operation: "subscription.change_items",
       key: idempotencyKey,
-      payload: { id, items },
+      payload: { id, items, policy },
       decodeReplay: decodeSubscription,
       execute: async (context) => {
         await this.#runtime.requireCapability("subscription.change_items", context);
@@ -150,7 +155,7 @@ export class SubscriptionService {
             quantity: item.quantity,
           })),
         );
-        const remote = await port(context, externalId, externalItems);
+        const remote = await port(context, externalId, { items: externalItems, policy });
         const updated = canonical(id, current.customerId, items, remote.value, current.version + 1);
         await commit(this.#runtime, updated, externalId, remote.evidence);
         return updated;
@@ -158,8 +163,12 @@ export class SubscriptionService {
     });
   }
 
-  pause(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
-    return this.#lifecycle(id, idempotencyKey, "pause");
+  pause(
+    id: Subscription["id"],
+    idempotencyKey: IdempotencyKey,
+    policy: SubscriptionPausePolicy,
+  ): Promise<Subscription> {
+    return this.#lifecycle(id, idempotencyKey, "pause", policy);
   }
 
   resume(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
@@ -216,6 +225,7 @@ export class SubscriptionService {
     id: Subscription["id"],
     idempotencyKey: IdempotencyKey,
     action: "pause" | "resume",
+    pausePolicy?: SubscriptionPausePolicy,
   ): Promise<Subscription> {
     const current = await this.get(id);
     if (current === undefined) throw notFound();
@@ -223,18 +233,22 @@ export class SubscriptionService {
     return this.#runtime.mutate({
       operation,
       key: idempotencyKey,
-      payload: { id, action },
+      payload: { id, action, ...(pausePolicy === undefined ? {} : { policy: pausePolicy }) },
       decodeReplay: decodeSubscription,
       execute: async (context) => {
         await this.#runtime.requireCapability(operation, context);
         const subscriptions = this.#runtime.options.adapter.subscriptions;
-        const port = action === "pause" ? subscriptions?.pause : subscriptions?.resume;
-        if (port === undefined) throw unsupported(operation);
         const externalId = requireExternalId(
           await mapping(this.#runtime, "subscription", id),
           operation,
         );
-        const remote = await port(context, externalId);
+        const remote = await lifecycleRemote(
+          subscriptions,
+          action,
+          context,
+          externalId,
+          pausePolicy,
+        );
         const updated = canonical(
           id,
           current.customerId,
@@ -344,4 +358,26 @@ function requirePriceId(value: string | undefined): PriceId {
       retryable: false,
     });
   return parseId<"PriceId">(value, "price");
+}
+
+function requirePausePolicy(policy: SubscriptionPausePolicy | undefined): SubscriptionPausePolicy {
+  if (policy === undefined) throw new TypeError("Pause policy is required");
+  return policy;
+}
+
+async function lifecycleRemote(
+  subscriptions: ResourceRuntime["options"]["adapter"]["subscriptions"],
+  action: "pause" | "resume",
+  context: Parameters<NonNullable<NonNullable<typeof subscriptions>["get"]>>[0],
+  externalId: string,
+  pausePolicy: SubscriptionPausePolicy | undefined,
+) {
+  if (action === "pause") {
+    const pause = subscriptions?.pause;
+    if (pause === undefined) throw unsupported("subscription.pause");
+    return pause(context, externalId, requirePausePolicy(pausePolicy));
+  }
+  const resume = subscriptions?.resume;
+  if (resume === undefined) throw unsupported("subscription.resume");
+  return resume(context, externalId);
 }

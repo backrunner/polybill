@@ -175,6 +175,29 @@ interface ScheduledChange {
 }
 ```
 
+订阅项目变更和暂停不能只用一个动词表示。项目变更命令必须同时声明生效时间与 proration：
+
+```ts
+interface SubscriptionItemChangePolicy {
+  readonly timing: "immediately" | "period_end";
+  readonly proration: "none" | "prorate_next_invoice" | "prorate_immediately";
+}
+
+interface SubscriptionPausePolicy {
+  readonly timing: "immediately" | "period_end";
+  readonly invoiceBehavior:
+    | "stop_billing"
+    | "void"
+    | "keep_draft"
+    | "mark_uncollectible";
+}
+```
+
+`period_end + prorate_immediately` 是矛盾组合，必须在 transport 前拒绝。`stop_billing` 表示暂停期
+不生成账单；其余三种表示 provider 仍生成账单但分别作废、保留草稿或标记不可收取。adapter 只有
+在 provider 同时匹配 timing、proration 和 invoice behavior 时才能声明 `native/exact`；例如仅有
+“暂停收款”但 subscription billing period 继续推进的 API，不能冒充 `stop_billing`。
+
 取消中不增加一个混合状态：保持当前 billing status，并设置 `scheduledChange` 和
 `accessUntil`。provider raw status、period、trial、collection method、items 和 proration evidence
 保存在 snapshot。
@@ -287,6 +310,7 @@ interface CanonicalBillingEvent<TType extends string, TData> {
 | `polybill_license_instances` | activations | license + instance ID |
 | `polybill_voucher_*` | batches, code digest, redemptions | tenant + digest |
 | `polybill_migration_*` | plans, items, checkpoints | migration + item key |
+| `polybill_reconciliation_checkpoints` | authoritative refresh cursor | connection + stream |
 | `polybill_audit` | immutable state/command evidence | tenant + sequence |
 
 所有表都带 `tenant_id`。D1 中金额和 64-bit 时间可以存 TEXT/INTEGER，但 codec 必须验证范围；

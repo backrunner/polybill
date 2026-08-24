@@ -61,6 +61,36 @@ export interface MappingReader {
   ): Promise<string | undefined>;
 }
 
+export type ReconciliationEntityType = "customer" | "subscription" | "refund";
+
+export interface ReconciliationTarget {
+  readonly entityType: ReconciliationEntityType;
+  readonly entityId: string;
+  readonly externalId: string;
+}
+
+export interface ReconciliationStore {
+  listReconciliationTargets(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: ConnectionId;
+    readonly after?: string;
+    readonly limit: number;
+  }): Promise<{ readonly items: readonly ReconciliationTarget[]; readonly nextCursor?: string }>;
+  getReconciliationCheckpoint(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: ConnectionId;
+    readonly stream: string;
+  }): Promise<{ readonly cursor?: string; readonly sequence: number } | undefined>;
+  saveReconciliationCheckpoint(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: ConnectionId;
+    readonly stream: string;
+    readonly cursor?: string;
+    readonly sequence: number;
+    readonly observedAt: IsoDateTime;
+  }): Promise<void>;
+}
+
 export interface ResourceCommit {
   readonly tenantId: TenantId;
   readonly connectionId: ConnectionId;
@@ -97,7 +127,13 @@ export interface CheckoutStore {
 }
 
 export interface ApplicationStore
-  extends IdempotencyStore, CatalogReader, MappingReader, CheckoutStore, CanonicalResourceStore {}
+  extends
+    IdempotencyStore,
+    CatalogReader,
+    MappingReader,
+    CheckoutStore,
+    CanonicalResourceStore,
+    ReconciliationStore {}
 
 export interface IdGenerator {
   next(prefix: string): string;

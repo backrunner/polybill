@@ -9,6 +9,18 @@ export interface SubscriptionItem {
   readonly quantity: number;
 }
 
+export type SubscriptionMutationTiming = "immediately" | "period_end";
+
+export interface SubscriptionItemChangePolicy {
+  readonly timing: SubscriptionMutationTiming;
+  readonly proration: "none" | "prorate_next_invoice" | "prorate_immediately";
+}
+
+export interface SubscriptionPausePolicy {
+  readonly timing: SubscriptionMutationTiming;
+  readonly invoiceBehavior: "stop_billing" | "void" | "keep_draft" | "mark_uncollectible";
+}
+
 export interface ScheduledSubscriptionChange {
   readonly kind: "cancel" | "pause" | "resume" | "items";
   readonly effectiveAt: IsoDateTime;
@@ -51,4 +63,10 @@ export function applyObservedSubscriptionStatus(
     ...(rawStatus === undefined ? {} : { rawStatus }),
     version: subscription.version + 1,
   };
+}
+
+export function assertSubscriptionItemChangePolicy(policy: SubscriptionItemChangePolicy): void {
+  if (policy.timing === "period_end" && policy.proration === "prorate_immediately") {
+    throw new RangeError("A period-end item change cannot be prorated immediately");
+  }
 }

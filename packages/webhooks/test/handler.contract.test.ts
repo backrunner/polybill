@@ -11,7 +11,7 @@ const connection: ConnectionRef = {
   environment: "test",
 };
 
-function adapter(observed: Uint8Array[]): ProviderAdapter {
+function adapter(observed: Uint8Array[], mappedIds: (string | undefined)[] = []): ProviderAdapter {
   return {
     descriptor: {
       name: "stripe",
@@ -49,7 +49,15 @@ function adapter(observed: Uint8Array[]): ProviderAdapter {
           payload: new TextDecoder().decode(event.rawBody),
         };
       },
-      async map() {
+      async map(event, context) {
+        mappedIds.push(
+          await context.lookup.findCanonicalId({
+            tenantId: context.tenantId,
+            connectionId: context.connection.id,
+            entityType: "payment",
+            externalId: event.externalIds.payment ?? "",
+          }),
+        );
         return [
           {
             id: parseId<"EventId">("evt_canonical01", "evt"),
@@ -86,8 +94,9 @@ function request(body = '{\n  "type": "payment.succeeded"\n}', delivery = "deliv
 describe("unified webhook contract", () => {
   it("verifies raw bytes, claims the inbox, and applies asynchronously", async () => {
     const observed: Uint8Array[] = [];
+    const mappedIds: (string | undefined)[] = [];
     const inbox = new MemoryWebhookInbox();
-    const adapters = new Map([["stripe", adapter(observed)]]);
+    const adapters = new Map([["stripe", adapter(observed, mappedIds)]]);
     const handler = createWebhookHandler({
       adapters,
       inbox,
@@ -109,8 +118,16 @@ describe("unified webhook contract", () => {
     const record = inbox.queued[0];
     expect(record).toBeDefined();
     if (record === undefined) return;
-    await createWebhookConsumer({ adapters, inbox })(record);
+    await createWebhookConsumer({
+      adapters,
+      inbox,
+      mappingStore: {
+        findCanonicalId: async (_tenant, _connection, type, externalId) =>
+          type === "payment" && externalId === "pi_fixture" ? "pay_fixture01" : undefined,
+      },
+    })(record);
     expect(inbox.state(connection.id, "delivery-1")).toBe("applied");
+    expect(mappedIds).toEqual(["pay_fixture01"]);
   });
 
   it("deduplicates before queueing and rejects invalid signatures", async () => {

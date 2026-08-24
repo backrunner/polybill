@@ -4,7 +4,15 @@ import parser from "@typescript-eslint/parser";
 import prettier from "eslint-config-prettier";
 
 export default [
-  { ignores: ["**/dist/**", "**/coverage/**", "**/.wrangler/**", "node_modules/**"] },
+  {
+    ignores: [
+      "**/dist/**",
+      "**/dist-worker/**",
+      "**/coverage/**",
+      "**/.wrangler/**",
+      "node_modules/**",
+    ],
+  },
   js.configs.recommended,
   {
     files: ["**/*.ts"],
@@ -40,6 +48,10 @@ export default [
   {
     files: ["**/test/**/*.ts", "**/*.test.ts"],
     rules: { "no-restricted-imports": "off" },
+  },
+  {
+    files: ["apps/example-node/**/*.ts", "apps/example-worker/**/*.ts"],
+    rules: { "no-restricted-imports": "off", "no-undef": "off" },
   },
   prettier,
 ];

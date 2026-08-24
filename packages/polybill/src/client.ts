@@ -9,10 +9,12 @@ import {
 } from "@polybill/adapter-kit";
 import {
   CatalogService,
+  CatalogSyncService,
   CheckoutService,
   CommerceQueryService,
   CustomerService,
   RefundService,
+  ReconciliationService,
   ResourceRuntime,
   SubscriptionService,
   type ApplicationStore,
@@ -61,6 +63,7 @@ export interface PolybillOptions {
 
 export interface PolybillClient {
   readonly catalog: CatalogService;
+  readonly catalogSync: CatalogSyncService;
   readonly customers: CustomerService;
   readonly checkouts: CheckoutService;
   readonly orders: {
@@ -75,6 +78,7 @@ export interface PolybillClient {
   };
   readonly refunds: RefundService;
   readonly subscriptions: SubscriptionService;
+  readonly reconcile: ReconciliationService;
   readonly licenses: LicenseService | undefined;
   readonly vouchers: VoucherService | undefined;
   readonly migrations: MigrationRunner | undefined;
@@ -127,12 +131,14 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
 
   return {
     catalog: new CatalogService(resources),
+    catalogSync: new CatalogSyncService(resources),
     customers: new CustomerService(resources),
     checkouts: new CheckoutService(shared),
     orders: { get: (id) => queries.order(id) },
     payments: { get: (id) => queries.payment(id) },
     refunds: new RefundService(resources),
     subscriptions: new SubscriptionService(resources),
+    reconcile: new ReconciliationService(resources),
     licenses,
     vouchers,
     migrations:

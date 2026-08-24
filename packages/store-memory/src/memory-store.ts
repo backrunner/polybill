@@ -4,6 +4,7 @@ import type {
   IdempotencyClaim,
   IdempotencyScope,
   ResourceCommit,
+  ReconciliationTarget,
 } from "@polybill/application";
 import type { CheckoutSession, Price, TenantId } from "@polybill/core";
 
@@ -22,6 +23,8 @@ export class MemoryStore implements ApplicationStore {
   readonly #checkouts = new Map<string, CheckoutSession>();
   readonly #mappings = new Map<string, string>();
   readonly #reverseMappings = new Map<string, string>();
+  readonly #mappingRecords = new Map<string, ReconciliationTarget>();
+  readonly #reconciliationCheckpoints = new Map<string, { cursor?: string; sequence: number }>();
   readonly #resources = new Map<string, unknown>();
   readonly #commits: CheckoutCommit[] = [];
   #leaseSequence = 0;
@@ -39,6 +42,12 @@ export class MemoryStore implements ApplicationStore {
   ): void {
     this.#mappings.set(`${tenantId}:${connectionId}:${entityType}:${entityId}`, externalId);
     this.#reverseMappings.set(`${tenantId}:${connectionId}:${entityType}:${externalId}`, entityId);
+    if (entityType === "customer" || entityType === "subscription" || entityType === "refund")
+      this.#mappingRecords.set(`${tenantId}:${connectionId}:${entityType}:${entityId}`, {
+        entityType,
+        entityId,
+        externalId,
+      });
   }
 
   get commits(): readonly CheckoutCommit[] {
@@ -131,6 +140,54 @@ export class MemoryStore implements ApplicationStore {
       );
   }
 
+  async listReconciliationTargets(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: string;
+    readonly after?: string;
+    readonly limit: number;
+  }) {
+    const prefix = `${input.tenantId}:${input.connectionId}:`;
+    const values = [...this.#mappingRecords.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, value]) => value)
+      .sort((left, right) => cursor(left).localeCompare(cursor(right)))
+      .filter((value) => input.after === undefined || cursor(value) > input.after)
+      .slice(0, input.limit);
+    const last = values.at(-1);
+    const nextCursor = last === undefined ? undefined : cursor(last);
+    return {
+      items: globalThis.structuredClone(values),
+      ...(nextCursor === undefined ? {} : { nextCursor }),
+    };
+  }
+
+  async getReconciliationCheckpoint(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: string;
+    readonly stream: string;
+  }) {
+    const value = this.#reconciliationCheckpoints.get(
+      `${input.tenantId}:${input.connectionId}:${input.stream}`,
+    );
+    return value === undefined ? undefined : globalThis.structuredClone(value);
+  }
+
+  async saveReconciliationCheckpoint(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: string;
+    readonly stream: string;
+    readonly cursor?: string;
+    readonly sequence: number;
+  }): Promise<void> {
+    const key = `${input.tenantId}:${input.connectionId}:${input.stream}`;
+    const current = this.#reconciliationCheckpoints.get(key);
+    if (current === undefined || input.sequence >= current.sequence)
+      this.#reconciliationCheckpoints.set(key, {
+        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        sequence: input.sequence,
+      });
+  }
+
   async getResource<T>(
     tenantId: TenantId,
     entityType: string,
@@ -180,4 +237,8 @@ export function createMemoryStore(): MemoryStore {
 
 function scopeKey(scope: IdempotencyScope): string {
   return `${scope.tenantId}:${scope.connectionId}:${scope.operation}:${scope.key}`;
+}
+
+function cursor(target: ReconciliationTarget): string {
+  return `${target.entityType}:${target.entityId}`;
 }

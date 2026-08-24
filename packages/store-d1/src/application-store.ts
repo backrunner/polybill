@@ -4,6 +4,7 @@ import type {
   IdempotencyClaim,
   IdempotencyScope,
   ResourceCommit,
+  ReconciliationTarget,
 } from "@polybill/application";
 import type { CheckoutSession, Price, TenantId } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
@@ -187,6 +188,73 @@ export class D1ApplicationStore implements ApplicationStore {
         ),
     ];
     await this.#db.batch(statements);
+  }
+
+  async listReconciliationTargets(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: string;
+    readonly after?: string;
+    readonly limit: number;
+  }) {
+    const result = await this.#db
+      .prepare(
+        `SELECT entity_type, entity_id, external_id FROM polybill_mappings WHERE tenant_id = ? AND connection_id = ? AND entity_type IN ('customer', 'subscription', 'refund') AND (entity_type || ':' || entity_id) > ? ORDER BY entity_type, entity_id LIMIT ?`,
+      )
+      .bind(input.tenantId, input.connectionId, input.after ?? "", input.limit)
+      .all<{
+        entity_type: ReconciliationTarget["entityType"];
+        entity_id: string;
+        external_id: string;
+      }>();
+    const items = (result.results ?? []).map((row) => ({
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      externalId: row.external_id,
+    }));
+    const last = items[items.length - 1];
+    return {
+      items,
+      ...(last !== undefined ? { nextCursor: `${last.entityType}:${last.entityId}` } : {}),
+    };
+  }
+
+  async getReconciliationCheckpoint(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: string;
+    readonly stream: string;
+  }) {
+    const row = await this.#db
+      .prepare(
+        "SELECT cursor, sequence FROM polybill_reconciliation_checkpoints WHERE tenant_id = ? AND connection_id = ? AND stream = ?",
+      )
+      .bind(input.tenantId, input.connectionId, input.stream)
+      .first<{ cursor: string | null; sequence: number }>();
+    return row === null
+      ? undefined
+      : { ...(row.cursor === null ? {} : { cursor: row.cursor }), sequence: row.sequence };
+  }
+
+  async saveReconciliationCheckpoint(input: {
+    readonly tenantId: TenantId;
+    readonly connectionId: string;
+    readonly stream: string;
+    readonly cursor?: string;
+    readonly sequence: number;
+    readonly observedAt: string;
+  }): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO polybill_reconciliation_checkpoints (tenant_id, connection_id, stream, cursor, sequence, observed_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id, connection_id, stream) DO UPDATE SET cursor = excluded.cursor, sequence = excluded.sequence, observed_at = excluded.observed_at WHERE excluded.sequence >= polybill_reconciliation_checkpoints.sequence`,
+      )
+      .bind(
+        input.tenantId,
+        input.connectionId,
+        input.stream,
+        input.cursor ?? null,
+        input.sequence,
+        input.observedAt,
+      )
+      .run();
   }
 
   async getResource<T>(

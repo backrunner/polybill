@@ -4,6 +4,8 @@ import type {
   IsoDateTime,
   Money,
   PriceModel,
+  SubscriptionItemChangePolicy,
+  SubscriptionPausePolicy,
   SubscriptionStatus,
 } from "@polybill/core";
 import type { ProviderContext } from "./context.js";
@@ -144,11 +146,15 @@ export interface SubscriptionProvider {
   changeItems?(
     context: ProviderContext,
     externalId: string,
-    items: readonly ProviderSubscriptionItem[],
+    input: {
+      readonly items: readonly ProviderSubscriptionItem[];
+      readonly policy: SubscriptionItemChangePolicy;
+    },
   ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
   pause?(
     context: ProviderContext,
     externalId: string,
+    policy: SubscriptionPausePolicy,
   ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
   resume?(
     context: ProviderContext,

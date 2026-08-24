@@ -285,4 +285,88 @@ describe("Stripe adapter contract", () => {
     });
     scripted.assertConsumed();
   });
+
+  it("changes subscription items with explicit proration and maps pause collection semantics", async () => {
+    const active = {
+      id: "sub_fixture",
+      customer: "cus_fixture",
+      status: "active",
+      pause_collection: null,
+      items: {
+        data: [{ id: "si_fixture", price: { id: "price_old" }, quantity: 1 }],
+      },
+      current_period_start: 1_756_080_000,
+      current_period_end: 1_758_758_400,
+      cancel_at_period_end: false,
+    };
+    const scripted = createScriptedFetch([
+      {
+        method: "GET",
+        url: "https://api.stripe.com/v1/subscriptions/sub_fixture",
+        response: Response.json(active),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/subscriptions/sub_fixture",
+        response: Response.json({
+          ...active,
+          items: { data: [{ id: "si_fixture", price: { id: "price_old" }, quantity: 3 }] },
+        }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/subscriptions/sub_fixture",
+        response: Response.json({ ...active, pause_collection: { behavior: "void" } }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/subscriptions/sub_fixture",
+        response: Response.json(active),
+      },
+    ]);
+    const adapter = createStripeAdapter();
+    const ctx = context(scripted.fetch);
+    await expect(
+      adapter.subscriptions?.changeItems?.(ctx, "sub_fixture", {
+        items: [{ externalPriceId: "price_old", quantity: 3 }],
+        policy: { timing: "immediately", proration: "prorate_immediately" },
+      }),
+    ).resolves.toMatchObject({ value: { items: [{ quantity: 3 }] } });
+    expect(await scripted.requests[1]?.clone().text()).toContain(
+      "proration_behavior=always_invoice",
+    );
+    expect(await scripted.requests[1]?.clone().text()).toContain("items%5B0%5D%5Bid%5D=si_fixture");
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, "sub_fixture", {
+        timing: "immediately",
+        invoiceBehavior: "void",
+      }),
+    ).resolves.toMatchObject({ value: { status: "paused" } });
+    await expect(adapter.subscriptions?.resume?.(ctx, "sub_fixture")).resolves.toMatchObject({
+      value: { status: "active" },
+    });
+    scripted.assertConsumed();
+  });
+
+  it("rejects unsupported Stripe subscription mutation policies before transport", async () => {
+    let calls = 0;
+    const adapter = createStripeAdapter();
+    const ctx = context(async () => {
+      calls += 1;
+      return Response.json({});
+    });
+    await expect(
+      adapter.subscriptions?.changeItems?.(ctx, "sub_fixture", {
+        items: [{ externalPriceId: "price_fixture", quantity: 1 }],
+        policy: { timing: "period_end", proration: "none" },
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, "sub_fixture", {
+        timing: "immediately",
+        invoiceBehavior: "stop_billing",
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    expect(calls).toBe(0);
+  });
 });

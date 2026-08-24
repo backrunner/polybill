@@ -6,7 +6,13 @@ import {
   type ProviderSubscriptionSnapshot,
   type SubscriptionProvider,
 } from "@polybill/adapter-kit";
-import { parseIsoDateTime, type SubscriptionStatus } from "@polybill/core";
+import {
+  PolybillError,
+  parseIsoDateTime,
+  type ConnectionId,
+  type SubscriptionPausePolicy,
+  type SubscriptionStatus,
+} from "@polybill/core";
 import { creemRequest } from "./client.js";
 import { creemResult } from "./result.js";
 
@@ -33,7 +39,8 @@ export const creemSubscriptions: SubscriptionProvider = {
       ),
     );
   },
-  async pause(context, externalId) {
+  async pause(context, externalId, policy) {
+    assertPausePolicy(context.connection.id, policy);
     return creemResult(
       context,
       decode(
@@ -62,6 +69,17 @@ export const creemSubscriptions: SubscriptionProvider = {
     );
   },
 };
+
+function assertPausePolicy(connectionId: ConnectionId, policy: SubscriptionPausePolicy): void {
+  if (policy.timing !== "immediately" || policy.invoiceBehavior !== "stop_billing")
+    throw new PolybillError("Creem only supports an immediate stop-billing pause", {
+      code: "unsupported_capability",
+      operation: "creem.subscription.pause",
+      provider: "creem",
+      connectionId,
+      retryable: false,
+    });
+}
 
 function decode(value: unknown): ProviderSubscriptionSnapshot {
   const root = object(value, "creem", "creem.subscription.decode");

@@ -4,7 +4,13 @@ import {
   type ProviderSubscriptionSnapshot,
   type SubscriptionProvider,
 } from "@polybill/adapter-kit";
-import { parseIsoDateTime, type SubscriptionStatus } from "@polybill/core";
+import {
+  PolybillError,
+  parseIsoDateTime,
+  type ConnectionId,
+  type SubscriptionPausePolicy,
+  type SubscriptionStatus,
+} from "@polybill/core";
 import { dodoRequest } from "./client.js";
 import { dodoResult } from "./result.js";
 
@@ -36,7 +42,8 @@ export const dodoSubscriptions: SubscriptionProvider = {
       ),
     );
   },
-  async pause(context, externalId) {
+  async pause(context, externalId, policy) {
+    assertPausePolicy(context.connection.id, policy);
     return lifecycle(context, externalId, "paused");
   },
   async resume(context, externalId) {
@@ -59,6 +66,17 @@ async function lifecycle(
       ).json(),
     ),
   );
+}
+
+function assertPausePolicy(connectionId: ConnectionId, policy: SubscriptionPausePolicy): void {
+  if (policy.timing !== "immediately" || policy.invoiceBehavior !== "stop_billing")
+    throw new PolybillError("Dodo only supports an immediate stop-billing pause", {
+      code: "unsupported_capability",
+      operation: "dodo.subscription.pause",
+      provider: "dodo",
+      connectionId,
+      retryable: false,
+    });
 }
 
 function decode(value: unknown): ProviderSubscriptionSnapshot {

@@ -171,6 +171,17 @@ type CheckoutPricing =
 - provider 只允许 dashboard 预建变体：`unsupported`，要求调用者先做 catalog sync。
 - pay-what-you-want 不等价于服务端任意定价；capability constraint 必须标明金额由谁选择。
 
+## 6.1 Subscription mutation policy
+
+`changeItems` 接收 `{ items, policy }`，其中 policy 显式携带 `timing` 与 `proration`；`pause` 接收
+`{ timing, invoiceBehavior }`。provider request mapper 必须逐项匹配这些语义，不能用 dashboard
+默认值、账户默认值或未记录的 provider proration behavior。只支持部分组合时，capability
+`constraints` 必须列出允许的 timing/proration/invoice behavior，并在发送请求前拒绝其他组合。
+
+`pause_collection`、延后扣款、subscription schedule pause 和真正停止 billing period 是不同能力。
+adapter 必须按 provider 的实际账单与 entitlement 影响选择精确映射；无法证明等价时保持
+`unsupported`，或在调用者显式选择相应 invoice behavior 后执行。
+
 ## 7. Idempotency
 
 每个 mutation 必须声明 provider strategy：

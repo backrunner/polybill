@@ -43,6 +43,7 @@ describe("D1 control-plane contract", () => {
     await binding.exec(await migration("0001_control_plane.sql"));
     await binding.exec(await migration("0002_x402_nonce.sql"));
     await binding.exec(await migration("0003_migration_leases.sql"));
+    await binding.exec(await migration("0004_reconciliation_checkpoints.sql"));
   });
 
   afterEach(async () => {
@@ -269,6 +270,45 @@ describe("D1 control-plane contract", () => {
     });
     await store.setRouting("shadow_read", plan.id);
     await expect(store.getRouting()).resolves.toEqual({ mode: "shadow_read", planId: plan.id });
+  });
+
+  it("pages reconciliation mappings and keeps its checkpoint monotonic", async () => {
+    const store = new D1ApplicationStore(db);
+    await store.commitResource({
+      tenantId,
+      connectionId,
+      provider: "stripe",
+      entityType: "customer",
+      entityId: "cust_reconcile01",
+      externalId: "cus_external",
+      value: { id: "cust_reconcile01", externalId: "host-customer", status: "active" },
+      occurredAt: now,
+    });
+    await expect(
+      store.listReconciliationTargets({ tenantId, connectionId, limit: 10 }),
+    ).resolves.toMatchObject({
+      items: [{ entityType: "customer", entityId: "cust_reconcile01", externalId: "cus_external" }],
+      nextCursor: "customer:cust_reconcile01",
+    });
+    await store.saveReconciliationCheckpoint({
+      tenantId,
+      connectionId,
+      stream: "mutable",
+      cursor: "customer:cust_reconcile01",
+      sequence: 2,
+      observedAt: now,
+    });
+    await store.saveReconciliationCheckpoint({
+      tenantId,
+      connectionId,
+      stream: "mutable",
+      cursor: "older",
+      sequence: 1,
+      observedAt: now,
+    });
+    await expect(
+      store.getReconciliationCheckpoint({ tenantId, connectionId, stream: "mutable" }),
+    ).resolves.toEqual({ cursor: "customer:cust_reconcile01", sequence: 2 });
   });
 });
 

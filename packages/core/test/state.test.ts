@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { money, parseId, transitionPayment, type Payment } from "../src/index.js";
+import {
+  assertSubscriptionItemChangePolicy,
+  money,
+  parseId,
+  transitionPayment,
+  type Payment,
+} from "../src/index.js";
 
 function payment(status: Payment["status"]): Payment {
   return {
@@ -21,5 +27,28 @@ describe("payment state", () => {
 
   it("does not reopen terminal attempts", () => {
     expect(() => transitionPayment(payment("succeeded"), "processing")).toThrow(/Invalid/);
+  });
+});
+
+describe("subscription mutation policy", () => {
+  it("accepts explicit compatible timing and proration", () => {
+    expect(() =>
+      assertSubscriptionItemChangePolicy({
+        timing: "immediately",
+        proration: "prorate_immediately",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertSubscriptionItemChangePolicy({ timing: "period_end", proration: "none" }),
+    ).not.toThrow();
+  });
+
+  it("rejects immediate proration for a period-end change", () => {
+    expect(() =>
+      assertSubscriptionItemChangePolicy({
+        timing: "period_end",
+        proration: "prorate_immediately",
+      }),
+    ).toThrow(/period-end/);
   });
 });

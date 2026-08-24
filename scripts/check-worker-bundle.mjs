@@ -17,7 +17,12 @@ async function walk(directory) {
   for (const entry of entries) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === "node_modules" || entry.name === ".wrangler") continue;
+      if (
+        entry.name === "node_modules" ||
+        entry.name === ".wrangler" ||
+        path === join("apps", "example-node")
+      )
+        continue;
       await walk(path);
     } else if (path.includes("/dist/") && [".js", ".mjs"].includes(extname(path))) {
       const source = await readFile(path, "utf8");

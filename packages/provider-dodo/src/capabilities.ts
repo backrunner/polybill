@@ -29,7 +29,10 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
       "customer.portal": native,
       "subscription.read": native,
       "subscription.cancel": native,
-      "subscription.pause": native,
+      "subscription.pause": {
+        ...native,
+        constraints: { timing: ["immediately"], invoiceBehavior: ["stop_billing"] },
+      },
       "subscription.resume": native,
       "refund.full": native,
       "refund.partial": unsupportedCapability(

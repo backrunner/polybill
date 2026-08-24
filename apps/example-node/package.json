@@ -1,0 +1,26 @@
+{
+  "name": "@polybill/example-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@polybill/adapter-kit": "workspace:^",
+    "@polybill/core": "workspace:^",
+    "@polybill/provider-creem": "workspace:^",
+    "@polybill/provider-dodo": "workspace:^",
+    "@polybill/provider-lemonsqueezy": "workspace:^",
+    "@polybill/provider-paddle": "workspace:^",
+    "@polybill/provider-polar": "workspace:^",
+    "@polybill/provider-stripe": "workspace:^",
+    "@polybill/provider-waffo": "workspace:^",
+    "@polybill/provider-x402": "workspace:^",
+    "@polybill/store-memory": "workspace:^",
+    "@polybill/webhooks": "workspace:^",
+    "polybill": "workspace:^"
+  }
+}

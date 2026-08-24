@@ -1,0 +1,34 @@
+name = "polybill-example-worker"
+main = "src/worker.ts"
+compatibility_date = "2026-08-20"
+
+[vars]
+POLYBILL_TENANT_ID = "ten_replace_me"
+POLYBILL_CONNECTION_ID = "conn_replace_me"
+POLYBILL_PROVIDER = "stripe"
+POLYBILL_ENVIRONMENT = "test"
+
+[[d1_databases]]
+binding = "POLYBILL_DB"
+database_name = "polybill-control"
+database_id = "replace-with-d1-database-id"
+migrations_dir = "../../packages/store-d1/migrations"
+
+[[queues.producers]]
+binding = "POLYBILL_WEBHOOK_QUEUE"
+queue = "polybill-webhooks"
+
+[[queues.consumers]]
+queue = "polybill-webhooks"
+max_batch_size = 20
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "polybill-webhooks-dlq"
+
+[[durable_objects.bindings]]
+name = "REDEMPTION_COORDINATOR"
+class_name = "VoucherRedemptionCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["VoucherRedemptionCoordinator"]

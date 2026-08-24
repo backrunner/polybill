@@ -108,6 +108,14 @@ describe("polybill facade", () => {
       name: "Pro Plus",
     });
     expect(updatedProduct).toMatchObject({ name: "Pro Plus", version: 2 });
+    await expect(client.catalogSync.diffProduct(product.id)).resolves.toMatchObject({
+      status: "matched",
+      differences: [],
+    });
+    await expect(client.catalogSync.diffPrice(createdPrice.id)).resolves.toMatchObject({
+      status: "matched",
+      differences: [],
+    });
     const customer = await client.customers.create({
       idempotencyKey: parseIdempotencyKey("facade:customer:0001"),
       externalId: "host-user-123",
@@ -127,12 +135,14 @@ describe("polybill facade", () => {
       subscription.id,
       parseIdempotencyKey("facade:subscription:items:0001"),
       [{ priceId: createdPrice.id, quantity: 2 }],
+      { timing: "immediately", proration: "none" },
     );
     expect(changed.items).toEqual([{ priceId: createdPrice.id, quantity: 2 }]);
     await expect(
       client.subscriptions.pause(
         subscription.id,
         parseIdempotencyKey("facade:subscription:pause:0001"),
+        { timing: "immediately", invoiceBehavior: "stop_billing" },
       ),
     ).resolves.toMatchObject({ status: "paused" });
     await expect(
@@ -215,6 +225,20 @@ describe("polybill facade", () => {
         name: "Updated Buyer",
       }),
     ).resolves.toMatchObject({ name: "Updated Buyer", status: "active" });
+    const reconciliation = await client.reconcile.run({
+      stream: "mutable-resources",
+      mode: "report_only",
+      idempotencyKey: parseIdempotencyKey("facade:reconcile:0001"),
+    });
+    expect(reconciliation.items).toHaveLength(3);
+    expect(reconciliation.items.every((item) => item.status === "matched")).toBe(true);
+    await expect(
+      client.reconcile.run({
+        stream: "mutable-resources",
+        mode: "report_only",
+        idempotencyKey: parseIdempotencyKey("facade:reconcile:0002"),
+      }),
+    ).resolves.toMatchObject({ items: [], sequence: 3 });
     await expect(
       client.customers.tombstone(customer.id, parseIdempotencyKey("facade:customer:delete:0001")),
     ).resolves.toMatchObject({ status: "tombstoned" });

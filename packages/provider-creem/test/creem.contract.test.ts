@@ -108,9 +108,18 @@ describe("Creem webhook contract", () => {
     await expect(
       adapter.subscriptions?.cancel?.(ctx, subscription.id, "period_end"),
     ).resolves.toMatchObject({ value: { status: "active", cancelAtPeriodEnd: true } });
-    await expect(adapter.subscriptions?.pause?.(ctx, subscription.id)).resolves.toMatchObject({
-      value: { status: "paused" },
-    });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, subscription.id, {
+        timing: "immediately",
+        invoiceBehavior: "void",
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(
+      adapter.subscriptions?.pause?.(ctx, subscription.id, {
+        timing: "immediately",
+        invoiceBehavior: "stop_billing",
+      }),
+    ).resolves.toMatchObject({ value: { status: "paused" } });
     await expect(adapter.subscriptions?.resume?.(ctx, subscription.id)).resolves.toMatchObject({
       value: { status: "active" },
     });
