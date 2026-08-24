@@ -3,6 +3,7 @@ export * from "./catalog.js";
 export * from "./catalog-sync.js";
 export * from "./checkout.js";
 export * from "./customers.js";
+export * from "./discounts.js";
 export * from "./ports.js";
 export * from "./queries.js";
 export * from "./reconciliation.js";

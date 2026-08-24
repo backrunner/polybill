@@ -1,6 +1,10 @@
 import { createPolybill, createWebSecretCrypto } from "../src/index.js";
 import { money, parseId, parseIdempotencyKey, type Price } from "@polybill/core";
-import { createMemoryLicensingStore, createMemoryStore } from "@polybill/store-memory";
+import {
+  createMemoryDiscountStore,
+  createMemoryLicensingStore,
+  createMemoryStore,
+} from "@polybill/store-memory";
 import {
   createFakeProvider,
   createWebCryptoPort,
@@ -76,6 +80,7 @@ describe("polybill facade", () => {
           encryptionKeys: { "test-key": new Uint8Array(32).fill(22) },
         }),
       },
+      discounts: { store: createMemoryDiscountStore() },
     });
     const productCommand = {
       idempotencyKey: parseIdempotencyKey("facade:product:0001"),
@@ -204,6 +209,19 @@ describe("polybill facade", () => {
       cancelUrl: "https://merchant.example/cancel",
     });
     expect(adHoc.order.total).toEqual(money("700", "USD"));
+
+    const discountService = client.discounts;
+    if (discountService === undefined) throw new Error("Expected configured discount service");
+    const discount = await discountService.create({
+      idempotencyKey: parseIdempotencyKey("facade:discount:create:0001"),
+      code: "WELCOME10",
+      name: "Welcome discount",
+      value: { kind: "percentage", basisPoints: 1_000 },
+    });
+    await expect(discountService.findByCode("welcome10")).resolves.toEqual(discount);
+    await expect(
+      discountService.archive(discount.id, parseIdempotencyKey("facade:discount:archive:0001")),
+    ).resolves.toMatchObject({ status: "archived" });
 
     const entitlementService = client.entitlements;
     if (entitlementService === undefined) throw new Error("Expected entitlement service");

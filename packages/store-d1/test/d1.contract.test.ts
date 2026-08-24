@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { IdempotencyScope } from "@polybill/application";
+import { DiscountService, type IdempotencyScope } from "@polybill/application";
 import {
   money,
   parseId,
@@ -17,11 +17,12 @@ import {
   VoucherService,
 } from "@polybill/licensing";
 import { planMigration } from "@polybill/migration";
-import { DeterministicIds, VirtualClock } from "@polybill/testing";
+import { createWebCryptoPort, DeterministicIds, VirtualClock } from "@polybill/testing";
 import { Miniflare } from "miniflare";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   D1ApplicationStore,
+  D1DiscountStore,
   D1LicensingStore,
   D1MigrationStore,
   D1X402NonceStore,
@@ -87,6 +88,7 @@ describe("D1 control-plane contract", () => {
       .run();
     await binding.exec(await migration("0005_entitlements.sql"));
     await binding.exec(await migration("0006_entitlement_beneficiaries.sql"));
+    await binding.exec(await migration("0007_discounts.sql"));
   });
 
   afterEach(async () => {
@@ -297,6 +299,59 @@ describe("D1 control-plane contract", () => {
     await expect(service.get(tenantId, grantA.id)).resolves.toMatchObject({
       status: "suspended",
     });
+  });
+
+  it("persists isolated and idempotent discount lifecycle operations", async () => {
+    const store = new D1DiscountStore(db);
+    const service = new DiscountService({
+      tenantId,
+      store,
+      crypto: createWebCryptoPort(),
+      ids: new DeterministicIds(),
+      clock: new VirtualClock(now),
+    });
+    const command = {
+      idempotencyKey: parseIdempotencyKey("d1-discount-create-0001"),
+      code: " d1save ",
+      name: "D1 save",
+      value: { kind: "percentage" as const, basisPoints: 1_500 },
+    };
+    const created = await service.create(command);
+    await expect(service.create({ ...command, code: "D1SAVE" })).resolves.toEqual(created);
+    await expect(service.create({ ...command, name: "Changed" })).rejects.toMatchObject({
+      code: "idempotency_conflict",
+    });
+
+    const firstArchiveKey = parseIdempotencyKey("d1-discount-archive-a");
+    const secondArchiveKey = parseIdempotencyKey("d1-discount-archive-b");
+    const keys = [firstArchiveKey, secondArchiveKey];
+    const archived = await Promise.all(keys.map((key) => service.archive(created.id, key)));
+    expect(archived).toHaveLength(2);
+    expect(archived.every((discount) => discount.status === "archived")).toBe(true);
+    await expect(service.archive(created.id, firstArchiveKey)).resolves.toEqual(archived[0]);
+  });
+
+  it("rejects malformed persisted discounts at the D1 boundary", async () => {
+    await db
+      .prepare(
+        "INSERT INTO polybill_discounts (tenant_id, discount_id, code, status, issuance_key, payload_hash, value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind(
+        tenantId,
+        "disc_malformed01",
+        "BROKEN",
+        "active",
+        "d1-malformed-issuance",
+        "hash",
+        JSON.stringify({ id: "disc_malformed01", code: "BROKEN" }),
+      )
+      .run();
+    await expect(
+      new D1DiscountStore(db).getDiscount(
+        tenantId,
+        parseId<"DiscountId">("disc_malformed01", "disc"),
+      ),
+    ).rejects.toThrow("Stored D1 discount is invalid");
   });
 
   it("atomically redeems a single-use voucher once under contention", async () => {
