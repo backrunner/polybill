@@ -20,7 +20,12 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
         constraints: { requiresPayWhatYouWantProduct: true, oneTimeOnly: true },
       },
       "checkout.multi_item": native,
-      "checkout.discount": native,
+      "checkout.discount": unsupportedCapability(
+        "Canonical discount redemption and net Order totals are not yet connected to Dodo checkout",
+        [
+          "Use a provider-managed checkout code directly outside Polybill until discount support is enabled",
+        ],
+      ),
       "checkout.tax": native,
       "payment.one_time": native,
       "customer.read": native,

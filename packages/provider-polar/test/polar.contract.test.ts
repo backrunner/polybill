@@ -5,6 +5,12 @@ import { describe, expect, it } from "vitest";
 import { createPolarAdapter } from "../src/index.js";
 
 describe("Polar webhook contract", () => {
+  it("does not claim discounts before canonical net totals are connected", async () => {
+    const capability = (await createPolarAdapter().getCapabilities(context(globalThis.fetch)))
+      .capabilities["checkout.discount"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("verifies Standard Webhooks over exact raw bytes", async () => {
     const body = '{"type":"order.paid","data":{"id":"order_fixture"}}';
     const id = "msg_fixture";

@@ -33,6 +33,12 @@ function context(fetch: typeof globalThis.fetch) {
 }
 
 describe("Dodo adapter contract", () => {
+  it("does not claim discounts before canonical net totals are connected", async () => {
+    const capability = (await createDodoAdapter().getCapabilities(context(globalThis.fetch)))
+      .capabilities["checkout.discount"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("creates checkout sessions only from mapped catalog products", async () => {
     const scripted = createScriptedFetch([
       {
