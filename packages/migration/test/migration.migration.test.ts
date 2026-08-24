@@ -5,7 +5,10 @@ import {
   MemoryMigrationStore,
   MigrationRunner,
   analyzeSource,
+  importSourceItems,
+  parseMigrationCli,
   planMigration,
+  runMigrationCli,
   type MigrationPlan,
   type MigrationPlanItem,
   type MigrationTarget,
@@ -171,6 +174,70 @@ describe("migration toolkit", () => {
       { id: "cust_1", profile: { email: "[REDACTED]", nested: [{ apiKey: "[REDACTED]" }] } },
       { id: "cust_2", customerName: "[REDACTED]" },
     ]);
+  });
+
+  it("imports paginated provider snapshots with checkpoints and rejects cursor cycles", async () => {
+    const checkpoints: unknown[] = [];
+    const imported = await importSourceItems({
+      scanner: {
+        scan: async (_type, cursor) =>
+          cursor === undefined
+            ? { items: [{ id: "prod_1" }], nextCursor: "page-2" }
+            : { items: [{ id: "prod_2" }] },
+      },
+      codec: {
+        decode: (entityType, value) => ({
+          key: `${entityType}:${String(value.id)}`,
+          entityType,
+          sourceId: String(value.id),
+          payload: value,
+        }),
+      },
+      entityTypes: ["product"],
+      onCheckpoint: async (checkpoint) => {
+        checkpoints.push(checkpoint);
+      },
+    });
+    expect(imported.map((item) => item.key)).toEqual(["product:prod_1", "product:prod_2"]);
+    expect(checkpoints).toEqual([
+      { entityType: "product", cursor: "page-2", sequence: 1 },
+      { entityType: "product", sequence: 2 },
+    ]);
+    await expect(
+      importSourceItems({
+        scanner: { scan: async () => ({ items: [], nextCursor: "same" }) },
+        codec: {
+          decode: () => ({ key: "unused", entityType: "product", sourceId: "unused", payload: {} }),
+        },
+        entityTypes: ["product"],
+      }),
+    ).rejects.toThrow(/cursor cycle/);
+  });
+
+  it("parses the migration CLI and requires confirmation for routing or writes", async () => {
+    expect(parseMigrationCli(["dry-run", "--plan", "migration-001", "--format", "json"])).toEqual({
+      action: "dry-run",
+      planId: "migration-001",
+      format: "json",
+      confirmed: false,
+    });
+    const output: string[] = [];
+    const backend = { execute: async () => ({ status: "applied" }) };
+    await expect(
+      runMigrationCli(["apply", "--plan", "migration-001"], backend, {
+        write: (value) => output.push(value),
+      }),
+    ).resolves.toBe(1);
+    expect(output[0]).toContain("requires --yes");
+    await expect(
+      runMigrationCli(
+        ["cutback", "--plan", "migration-001", "--mode", "shadow_read", "--yes"],
+        backend,
+        {
+          write: (value) => output.push(value),
+        },
+      ),
+    ).resolves.toBe(0);
   });
 });
 
