@@ -216,6 +216,23 @@ Policy 描述购买 SKU 后授予什么、何时撤销以及 grace period。Gran
 `pending | active | suspended | revoked | expired`。来源可以是 order、subscription、manual、
 voucher 或 migration。
 
+Policy 创建和 Grant 创建都必须携带 tenant-scoped idempotency key。一个 source 可以按多个 policy
+产生独立 Grant，因此来源唯一键是 `(tenant, policy, source, sourceRef)`，不能只按 sourceRef 去重。
+同一 idempotency key 和 payload 重放返回原 Grant；同一 policy/source 使用另一 key 重复创建时返回
+conflict，防止一个新 key 在未留下 claim 的情况下被误认为成功。状态迁移只允许：
+
+```text
+pending   -> active | revoked | expired
+active    -> suspended | revoked | expired
+suspended -> active | revoked | expired
+revoked   -> (terminal)
+expired   -> (terminal)
+```
+
+每次状态迁移携带 idempotency key，并由 Store 以条件更新和 transition ledger 原子提交。Grant 保存
+`grantedAt` 和 `updatedAt`；过期时间到达后不得签发、激活或验证 license，即使异步 expiry projection
+尚未把状态写成 `expired`。License 的 tenant 与 Grant tenant 必须同时匹配。
+
 ### License
 
 ```ts
@@ -305,7 +322,7 @@ interface CanonicalBillingEvent<TType extends string, TData> {
 | `polybill_outbox` | canonical/application event delivery | event ID + destination |
 | `polybill_snapshots` | latest canonical aggregate projection | type + canonical ID |
 | `polybill_catalog_*` | optional Product/SKU/Price source | stable IDs + versions |
-| `polybill_entitlement_*` | policy and grants | grant ID + source |
+| `polybill_entitlement_*` | policy、grants and transition ledger | policy + source + idempotency key |
 | `polybill_licenses` | key digest and state | tenant + digest |
 | `polybill_license_instances` | activations | license + instance ID |
 | `polybill_voucher_*` | batches, code digest, redemptions | tenant + digest |

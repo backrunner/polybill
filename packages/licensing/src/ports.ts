@@ -1,5 +1,13 @@
-import type { IsoDateTime, LicenseId, TenantId } from "@polybill/core";
 import type {
+  EntitlementGrantId,
+  EntitlementPolicyId,
+  IsoDateTime,
+  LicenseId,
+  TenantId,
+} from "@polybill/core";
+import type {
+  EntitlementGrant,
+  EntitlementPolicy,
   LicenseInstance,
   LicenseRecord,
   VoucherBatch,
@@ -7,9 +15,55 @@ import type {
   VoucherRedemption,
 } from "./domain.js";
 
+export type CreateEntitlementPolicyResult =
+  | { readonly kind: "created" | "replay"; readonly policy: EntitlementPolicy }
+  | { readonly kind: "conflict" };
+
+export type CreateEntitlementGrantResult =
+  | { readonly kind: "created" | "replay"; readonly grant: EntitlementGrant }
+  | { readonly kind: "policy_not_found" }
+  | { readonly kind: "conflict" };
+
+export type TransitionEntitlementGrantResult =
+  | { readonly kind: "changed" | "replay"; readonly grant: EntitlementGrant }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "invalid_transition" }
+  | { readonly kind: "conflict" };
+
+export interface EntitlementStore {
+  createEntitlementPolicy(
+    tenantId: TenantId,
+    policy: EntitlementPolicy,
+    idempotencyKey: string,
+    payloadHash: string,
+  ): Promise<CreateEntitlementPolicyResult>;
+  getEntitlementPolicy(
+    tenantId: TenantId,
+    policyId: EntitlementPolicyId,
+  ): Promise<EntitlementPolicy | undefined>;
+  createEntitlementGrant(
+    grant: EntitlementGrant,
+    idempotencyKey: string,
+    payloadHash: string,
+  ): Promise<CreateEntitlementGrantResult>;
+  getEntitlementGrant(
+    tenantId: TenantId,
+    grantId: EntitlementGrantId,
+  ): Promise<EntitlementGrant | undefined>;
+  transitionEntitlementGrant(input: {
+    readonly tenantId: TenantId;
+    readonly grantId: EntitlementGrantId;
+    readonly expectedStatuses: readonly EntitlementGrant["status"][];
+    readonly status: EntitlementGrant["status"];
+    readonly idempotencyKey: string;
+    readonly updatedAt: IsoDateTime;
+  }): Promise<TransitionEntitlementGrantResult>;
+}
+
 export type IssueLicenseResult =
   | { readonly kind: "created" | "replay"; readonly record: LicenseRecord }
-  | { readonly kind: "conflict" };
+  | { readonly kind: "conflict" }
+  | { readonly kind: "grant_inactive" };
 
 export type ActivateLicenseResult =
   | { readonly kind: "activated" | "replay"; readonly instance: LicenseInstance }
@@ -70,7 +124,7 @@ export interface VoucherStore {
   }): Promise<RedeemVoucherResult>;
 }
 
-export interface LicensingStore extends LicenseStore, VoucherStore {}
+export interface LicensingStore extends EntitlementStore, LicenseStore, VoucherStore {}
 
 export interface LicensingIds {
   next(prefix: string): string;

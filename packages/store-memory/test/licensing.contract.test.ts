@@ -1,10 +1,15 @@
 import { money, parseId, parseIsoDateTime } from "@polybill/core";
-import { createWebSecretCrypto, LicenseService, VoucherService } from "@polybill/licensing";
+import {
+  createWebSecretCrypto,
+  EntitlementService,
+  LicenseService,
+  VoucherService,
+} from "@polybill/licensing";
 import { describe, expect, it } from "vitest";
 import { createMemoryLicensingStore } from "../src/index.js";
 
 const tenantId = parseId<"TenantId">("ten_license01", "ten");
-const grantId = parseId<"EntitlementGrantId">("grant_license01", "grant");
+const otherTenantId = parseId<"TenantId">("ten_license02", "ten");
 
 function setup() {
   const store = createMemoryLicensingStore();
@@ -22,6 +27,7 @@ function setup() {
   return {
     store,
     crypto,
+    entitlements: new EntitlementService(common),
     licenses: new LicenseService(common),
     vouchers: new VoucherService(common),
   };
@@ -35,11 +41,91 @@ class TestIds {
 }
 
 describe("memory licensing store contract", () => {
+  it("creates isolated, idempotent grants and enforces their lifecycle", async () => {
+    const { entitlements } = setup();
+    const firstPolicy = await entitlements.createPolicy({
+      tenantId,
+      idempotencyKey: "policy-create-0001",
+      benefit: "app:pro",
+      revokeOn: "subscription_end",
+      gracePeriodSeconds: 3600,
+    });
+    const replay = await entitlements.createPolicy({
+      tenantId,
+      idempotencyKey: "policy-create-0001",
+      benefit: "app:pro",
+      revokeOn: "subscription_end",
+      gracePeriodSeconds: 3600,
+    });
+    expect(replay.id).toBe(firstPolicy.id);
+    const secondPolicy = await entitlements.createPolicy({
+      tenantId,
+      idempotencyKey: "policy-create-0002",
+      benefit: "app:analytics",
+      revokeOn: "refund",
+      gracePeriodSeconds: 0,
+    });
+    const firstGrant = await entitlements.grant({
+      tenantId,
+      idempotencyKey: "grant-create-0001",
+      policyId: firstPolicy.id,
+      source: "order",
+      sourceRef: "order-123",
+    });
+    const secondGrant = await entitlements.grant({
+      tenantId,
+      idempotencyKey: "grant-create-0002",
+      policyId: secondPolicy.id,
+      source: "order",
+      sourceRef: "order-123",
+    });
+    expect(secondGrant.policyId).not.toBe(firstGrant.policyId);
+    await expect(
+      entitlements.grant({
+        tenantId,
+        idempotencyKey: "grant-create-0003",
+        policyId: firstPolicy.id,
+        source: "order",
+        sourceRef: "order-123",
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(entitlements.get(otherTenantId, firstGrant.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const suspended = await entitlements.suspend(tenantId, firstGrant.id, "grant-suspend-0001");
+    await expect(
+      entitlements.suspend(tenantId, firstGrant.id, "grant-suspend-0001"),
+    ).resolves.toEqual(suspended);
+    await expect(
+      entitlements.restore(tenantId, firstGrant.id, "grant-suspend-0001"),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(
+      entitlements.suspend(tenantId, firstGrant.id, "grant-suspend-0002"),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      entitlements.restore(tenantId, firstGrant.id, "grant-restore-0001"),
+    ).resolves.toMatchObject({ status: "active" });
+  });
+
   it("issues an idempotent encrypted license and enforces activation CAS", async () => {
-    const { licenses } = setup();
+    const { entitlements, licenses } = setup();
+    const policy = await entitlements.createPolicy({
+      tenantId,
+      idempotencyKey: "policy-license-0001",
+      benefit: "app:licensed",
+      revokeOn: "refund",
+      gracePeriodSeconds: 0,
+    });
+    const grant = await entitlements.grant({
+      tenantId,
+      idempotencyKey: "grant-license-0001",
+      policyId: policy.id,
+      source: "manual",
+      sourceRef: "support-case-1",
+    });
     const command = {
       tenantId,
-      grantId,
+      grantId: grant.id,
       issuanceKey: "license-issuance-0001",
       activationLimit: 1,
     } as const;
@@ -60,6 +146,12 @@ describe("memory licensing store contract", () => {
       ),
     );
     expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+
+    await entitlements.revoke(tenantId, grant.id, "grant-revoke-0001");
+    await expect(licenses.validate({ tenantId, key: first.key })).resolves.toBeUndefined();
+    await expect(
+      licenses.issue({ ...command, issuanceKey: "license-issuance-0002" }),
+    ).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("atomically consumes a single-use voucher once under contention", async () => {

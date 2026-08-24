@@ -11,13 +11,14 @@ import type {
   VoucherRecord,
   VoucherRedemption,
 } from "@polybill/licensing";
+import { MemoryEntitlementStore } from "./entitlement-store.js";
 
 interface Issuance<T> {
   readonly payloadHash: string;
   readonly value: T;
 }
 
-export class MemoryLicensingStore implements LicensingStore {
+export class MemoryLicensingStore extends MemoryEntitlementStore implements LicensingStore {
   readonly #licenses = new Map<string, LicenseRecord>();
   readonly #licenseIssuance = new Map<string, Issuance<LicenseRecord>>();
   readonly #instances = new Map<string, LicenseInstance>();
@@ -28,6 +29,10 @@ export class MemoryLicensingStore implements LicensingStore {
   readonly #vouchers = new Map<string, VoucherRecord>();
   readonly #batches = new Map<string, VoucherBatch>();
   readonly #redemptions = new Map<string, { payload: string; value: VoucherRedemption }>();
+
+  constructor() {
+    super();
+  }
 
   async issueLicense(
     record: LicenseRecord,
@@ -40,6 +45,12 @@ export class MemoryLicensingStore implements LicensingStore {
       return existing.payloadHash === payloadHash
         ? { kind: "replay", record: clone(existing.value) }
         : { kind: "conflict" };
+    const grant = await this.getEntitlementGrant(record.tenantId, record.grantId);
+    if (
+      grant?.status !== "active" ||
+      (grant.expiresAt !== undefined && Date.parse(grant.expiresAt) <= Date.parse(record.issuedAt))
+    )
+      return { kind: "grant_inactive" };
     const digestKey = `${record.tenantId}:${record.digest}`;
     if (this.#licenses.has(digestKey)) throw new Error("License digest collision");
     this.#licenses.set(digestKey, clone(record));
@@ -57,6 +68,10 @@ export class MemoryLicensingStore implements LicensingStore {
   ): Promise<ActivateLicenseResult> {
     const license = this.#licenses.get(`${input.tenantId}:${input.digest}`);
     if (license === undefined) return { kind: "not_found" };
+    const grant = await this.getEntitlementGrant(input.tenantId, license.grantId);
+    if (grant?.status !== "active") return { kind: "inactive" };
+    if (grant.expiresAt !== undefined && Date.parse(grant.expiresAt) <= Date.parse(input.now))
+      return { kind: "expired" };
     if (license.status !== "active") return { kind: "inactive" };
     if (license.expiresAt !== undefined && Date.parse(license.expiresAt) <= Date.parse(input.now))
       return { kind: "expired" };

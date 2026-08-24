@@ -205,11 +205,27 @@ describe("polybill facade", () => {
     });
     expect(adHoc.order.total).toEqual(money("700", "USD"));
 
+    const entitlementService = client.entitlements;
+    if (entitlementService === undefined) throw new Error("Expected entitlement service");
+    const policy = await entitlementService.createPolicy({
+      tenantId,
+      idempotencyKey: "facade-policy-0001",
+      benefit: "app:pro",
+      revokeOn: "subscription_end",
+      gracePeriodSeconds: 3600,
+    });
+    const grant = await entitlementService.grant({
+      tenantId,
+      idempotencyKey: "facade-grant-0001",
+      policyId: policy.id,
+      source: "order",
+      sourceRef: checkout.order.id,
+    });
     const licenseService = client.licenses;
     if (licenseService === undefined) throw new Error("Expected configured license service");
     const issued = await licenseService.issue({
       tenantId,
-      grantId: parseId<"EntitlementGrantId">("grant_facade01", "grant"),
+      grantId: grant.id,
       issuanceKey: "facade-license-0001",
       activationLimit: 1,
       ownerRef: customer.id,

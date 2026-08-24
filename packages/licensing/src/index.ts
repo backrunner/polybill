@@ -1,5 +1,6 @@
 export * from "./crypto.js";
 export * from "./domain.js";
+export * from "./entitlement-service.js";
 export * from "./keys.js";
 export * from "./license-service.js";
 export * from "./ports.js";

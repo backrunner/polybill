@@ -1,10 +1,43 @@
 import type {
+  EntitlementGrant,
+  EntitlementPolicy,
   LicenseInstance,
   LicenseRecord,
   VoucherBatch,
   VoucherRecord,
   VoucherRedemption,
 } from "@polybill/licensing";
+
+export function decodeEntitlementPolicy(value: string): EntitlementPolicy {
+  const parsed = jsonRecord(value, "entitlement policy");
+  requiredStrings(parsed, ["id", "benefit", "revokeOn"]);
+  if (
+    !["refund", "subscription_end", "never"].includes(String(parsed.revokeOn)) ||
+    !nonNegativeInteger(parsed.gracePeriodSeconds)
+  )
+    throw invalid("entitlement policy");
+  return parsed as unknown as EntitlementPolicy;
+}
+
+export function decodeEntitlementGrant(value: string): EntitlementGrant {
+  const parsed = jsonRecord(value, "entitlement grant");
+  requiredStrings(parsed, [
+    "id",
+    "tenantId",
+    "policyId",
+    "source",
+    "sourceRef",
+    "status",
+    "grantedAt",
+    "updatedAt",
+  ]);
+  if (
+    !["order", "subscription", "manual", "voucher", "migration"].includes(String(parsed.source)) ||
+    !["pending", "active", "suspended", "revoked", "expired"].includes(String(parsed.status))
+  )
+    throw invalid("entitlement grant");
+  return parsed as unknown as EntitlementGrant;
+}
 
 export function decodeLicense(value: string): LicenseRecord {
   const parsed = jsonRecord(value, "license");

@@ -10,7 +10,12 @@ import {
   type Payment,
   type Price,
 } from "@polybill/core";
-import { createWebSecretCrypto, LicenseService, VoucherService } from "@polybill/licensing";
+import {
+  createWebSecretCrypto,
+  EntitlementService,
+  LicenseService,
+  VoucherService,
+} from "@polybill/licensing";
 import { planMigration } from "@polybill/migration";
 import { DeterministicIds, VirtualClock } from "@polybill/testing";
 import { Miniflare } from "miniflare";
@@ -44,10 +49,59 @@ describe("D1 control-plane contract", () => {
     await binding.exec(await migration("0002_x402_nonce.sql"));
     await binding.exec(await migration("0003_migration_leases.sql"));
     await binding.exec(await migration("0004_reconciliation_checkpoints.sql"));
+    await binding
+      .prepare(
+        "INSERT INTO polybill_entitlement_policies (tenant_id, policy_id, value) VALUES (?, ?, ?)",
+      )
+      .bind(
+        tenantId,
+        "epol_legacy01",
+        JSON.stringify({
+          id: "epol_legacy01",
+          benefit: "legacy:access",
+          revokeOn: "never",
+          gracePeriodSeconds: 0,
+        }),
+      )
+      .run();
+    await binding
+      .prepare(
+        "INSERT INTO polybill_entitlement_grants (tenant_id, grant_id, source, source_ref, status, value) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .bind(
+        tenantId,
+        "grant_legacy01",
+        "migration",
+        "legacy-record",
+        "active",
+        JSON.stringify({
+          id: "grant_legacy01",
+          tenantId,
+          policyId: "epol_legacy01",
+          source: "migration",
+          sourceRef: "legacy-record",
+          status: "active",
+          grantedAt: now,
+        }),
+      )
+      .run();
+    await binding.exec(await migration("0005_entitlements.sql"));
   });
 
   afterEach(async () => {
     await miniflare.dispose();
+  });
+
+  it("upgrades entitlement grants from the previous D1 schema", async () => {
+    const grant = await new D1LicensingStore(db).getEntitlementGrant(
+      tenantId,
+      parseId<"EntitlementGrantId">("grant_legacy01", "grant"),
+    );
+    expect(grant).toMatchObject({
+      policyId: "epol_legacy01",
+      status: "active",
+      updatedAt: now,
+    });
   });
 
   it("persists idempotency recovery and replays the completed result", async () => {
@@ -150,15 +204,33 @@ describe("D1 control-plane contract", () => {
 
   it("atomically enforces a license activation limit under contention", async () => {
     const store = new D1LicensingStore(db);
-    const service = new LicenseService({
+    const common = {
       store,
       crypto: secretCrypto(),
       ids: new DeterministicIds(),
       clock: new VirtualClock(now),
+    };
+    const entitlements = new EntitlementService(common);
+    const service = new LicenseService({
+      ...common,
+    });
+    const policy = await entitlements.createPolicy({
+      tenantId,
+      idempotencyKey: "d1-policy-license",
+      benefit: "app:licensed",
+      revokeOn: "refund",
+      gracePeriodSeconds: 0,
+    });
+    const grant = await entitlements.grant({
+      tenantId,
+      idempotencyKey: "d1-grant-license",
+      policyId: policy.id,
+      source: "manual",
+      sourceRef: "d1-license",
     });
     const issued = await service.issue({
       tenantId,
-      grantId: parseId<"EntitlementGrantId">("grant_d1license", "grant"),
+      grantId: grant.id,
       issuanceKey: "license-issuance-1",
       activationLimit: 1,
     });
@@ -173,6 +245,53 @@ describe("D1 control-plane contract", () => {
       ),
     );
     expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+  });
+
+  it("persists multi-policy grants and atomic transition idempotency", async () => {
+    const service = new EntitlementService({
+      store: new D1LicensingStore(db),
+      crypto: secretCrypto(),
+      ids: new DeterministicIds(),
+      clock: new VirtualClock(now),
+    });
+    const policyA = await service.createPolicy({
+      tenantId,
+      idempotencyKey: "d1-policy-create-a",
+      benefit: "app:a",
+      revokeOn: "refund",
+      gracePeriodSeconds: 0,
+    });
+    const policyB = await service.createPolicy({
+      tenantId,
+      idempotencyKey: "d1-policy-create-b",
+      benefit: "app:b",
+      revokeOn: "never",
+      gracePeriodSeconds: 0,
+    });
+    const grantA = await service.grant({
+      tenantId,
+      idempotencyKey: "d1-grant-create-a",
+      policyId: policyA.id,
+      source: "order",
+      sourceRef: "shared-order",
+    });
+    await expect(
+      service.grant({
+        tenantId,
+        idempotencyKey: "d1-grant-create-b",
+        policyId: policyB.id,
+        source: "order",
+        sourceRef: "shared-order",
+      }),
+    ).resolves.toMatchObject({ policyId: policyB.id });
+    const attempts = await Promise.allSettled([
+      service.suspend(tenantId, grantA.id, "d1-transition-suspend-a"),
+      service.suspend(tenantId, grantA.id, "d1-transition-suspend-b"),
+    ]);
+    expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+    await expect(service.get(tenantId, grantA.id)).resolves.toMatchObject({
+      status: "suspended",
+    });
   });
 
   it("atomically redeems a single-use voucher once under contention", async () => {

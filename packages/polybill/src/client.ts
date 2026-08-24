@@ -30,6 +30,7 @@ import {
   type TenantId,
 } from "@polybill/core";
 import {
+  EntitlementService,
   LicenseService,
   VoucherService,
   type LicensingStore,
@@ -79,6 +80,7 @@ export interface PolybillClient {
   readonly refunds: RefundService;
   readonly subscriptions: SubscriptionService;
   readonly reconcile: ReconciliationService;
+  readonly entitlements: EntitlementService | undefined;
   readonly licenses: LicenseService | undefined;
   readonly vouchers: VoucherService | undefined;
   readonly migrations: MigrationRunner | undefined;
@@ -110,6 +112,15 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
   };
   const resources = new ResourceRuntime(shared);
   const queries = new CommerceQueryService(resources);
+  const entitlements =
+    options.licensing === undefined
+      ? undefined
+      : new EntitlementService({
+          store: options.licensing.store,
+          crypto: options.licensing.crypto,
+          ids,
+          clock,
+        });
   const licenses =
     options.licensing === undefined
       ? undefined
@@ -139,6 +150,7 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
     refunds: new RefundService(resources),
     subscriptions: new SubscriptionService(resources),
     reconcile: new ReconciliationService(resources),
+    entitlements,
     licenses,
     vouchers,
     migrations:

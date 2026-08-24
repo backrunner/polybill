@@ -20,11 +20,13 @@ import {
   decodeVoucherBatch,
 } from "./licensing-codecs.js";
 import { consumeVoucher, validateVoucher } from "./voucher-logic.js";
+import { D1EntitlementStore } from "./entitlement-store.js";
 
-export class D1LicensingStore implements LicensingStore {
+export class D1LicensingStore extends D1EntitlementStore implements LicensingStore {
   readonly #db: D1DatabaseLike;
 
   constructor(db: D1DatabaseLike) {
+    super(db);
     this.#db = db;
   }
 
@@ -39,9 +41,9 @@ export class D1LicensingStore implements LicensingStore {
         ? { kind: "replay", record: decodeLicense(existing.value) }
         : { kind: "conflict" };
     try {
-      await this.#db
+      const inserted = await this.#db
         .prepare(
-          "INSERT INTO polybill_licenses (tenant_id, license_id, digest, encrypted_value, status, activation_limit, expires_at, grant_id, issuance_key, payload_hash, value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO polybill_licenses (tenant_id, license_id, digest, encrypted_value, status, activation_limit, expires_at, grant_id, issuance_key, payload_hash, value) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_entitlement_grants WHERE tenant_id = ? AND grant_id = ? AND status = 'active' AND (json_extract(value, '$.expiresAt') IS NULL OR json_extract(value, '$.expiresAt') > ?))",
         )
         .bind(
           record.tenantId,
@@ -55,8 +57,12 @@ export class D1LicensingStore implements LicensingStore {
           issuanceKey,
           payloadHash,
           JSON.stringify(record),
+          record.tenantId,
+          record.grantId,
+          record.issuedAt,
         )
         .run();
+      if (changes(inserted) !== 1) return { kind: "grant_inactive" };
       return { kind: "created", record };
     } catch (error) {
       const raced = await this.#licenseByIssuance(record.tenantId, issuanceKey);
@@ -91,6 +97,13 @@ export class D1LicensingStore implements LicensingStore {
         value: string;
       }>();
     if (licenseRow === null) return { kind: "not_found" };
+    const grant = await this.getEntitlementGrant(
+      input.tenantId,
+      decodeLicense(licenseRow.value).grantId,
+    );
+    if (grant?.status !== "active") return { kind: "inactive" };
+    if (grant.expiresAt !== undefined && Date.parse(grant.expiresAt) <= Date.parse(input.now))
+      return { kind: "expired" };
     if (licenseRow.status !== "active") return { kind: "inactive" };
     if (
       licenseRow.expires_at !== null &&
@@ -110,7 +123,7 @@ export class D1LicensingStore implements LicensingStore {
     };
     const inserted = await this.#db
       .prepare(
-        `INSERT INTO polybill_license_instances (tenant_id, instance_id, license_id, instance_ref, device_digest, activated_at, last_validated_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM polybill_license_instances WHERE tenant_id = ? AND license_id = ? AND deactivated_at IS NULL) < ? ON CONFLICT(tenant_id, license_id, instance_ref) DO NOTHING`,
+        `INSERT INTO polybill_license_instances (tenant_id, instance_id, license_id, instance_ref, device_digest, activated_at, last_validated_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM polybill_license_instances WHERE tenant_id = ? AND license_id = ? AND deactivated_at IS NULL) < ? AND EXISTS (SELECT 1 FROM polybill_entitlement_grants WHERE tenant_id = ? AND grant_id = ? AND status = 'active' AND (json_extract(value, '$.expiresAt') IS NULL OR json_extract(value, '$.expiresAt') > ?)) ON CONFLICT(tenant_id, license_id, instance_ref) DO NOTHING`,
       )
       .bind(
         input.tenantId,
@@ -123,6 +136,9 @@ export class D1LicensingStore implements LicensingStore {
         input.tenantId,
         instance.licenseId,
         licenseRow.activation_limit,
+        input.tenantId,
+        grant.id,
+        input.now,
       )
       .run();
     if (changes(inserted) === 1) return { kind: "activated", instance };
@@ -131,7 +147,15 @@ export class D1LicensingStore implements LicensingStore {
       licenseRow.license_id,
       input.instance.instanceRef,
     );
-    return raced === null ? { kind: "limit_reached" } : this.#refreshInstance(raced, input);
+    if (raced !== null) return this.#refreshInstance(raced, input);
+    const observedGrant = await this.getEntitlementGrant(input.tenantId, grant.id);
+    if (observedGrant?.status !== "active") return { kind: "inactive" };
+    if (
+      observedGrant.expiresAt !== undefined &&
+      Date.parse(observedGrant.expiresAt) <= Date.parse(input.now)
+    )
+      return { kind: "expired" };
+    return { kind: "limit_reached" };
   }
 
   async deactivateLicense(

@@ -27,6 +27,7 @@ export interface EntitlementGrant {
   readonly sourceRef: string;
   readonly status: "pending" | "active" | "suspended" | "revoked" | "expired";
   readonly grantedAt: IsoDateTime;
+  readonly updatedAt: IsoDateTime;
   readonly expiresAt?: IsoDateTime;
 }
 

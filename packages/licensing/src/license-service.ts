@@ -9,10 +9,10 @@ import {
 } from "@polybill/core";
 import { generateSecret, normalizeSecret } from "./keys.js";
 import type { LicenseInstance, LicenseRecord } from "./domain.js";
-import type { LicenseStore, LicensingIds, SecretCrypto } from "./ports.js";
+import type { EntitlementStore, LicenseStore, LicensingIds, SecretCrypto } from "./ports.js";
 
 export interface LicenseServiceOptions {
-  readonly store: LicenseStore;
+  readonly store: LicenseStore & EntitlementStore;
   readonly crypto: SecretCrypto;
   readonly ids: LicensingIds;
   readonly clock: Clock;
@@ -43,6 +43,7 @@ export class LicenseService {
       throw invalid("Activation limit must be a positive safe integer", "license.issue");
     if (command.issuanceKey.length < 8 || command.issuanceKey.length > 255)
       throw invalid("Invalid issuance key", "license.issue");
+    await this.#requireActiveGrant(command.tenantId, command.grantId, "license.issue");
     const payloadHash = await this.#options.crypto.hash(
       JSON.stringify([
         command.grantId,
@@ -69,6 +70,12 @@ export class LicenseService {
     const result = await this.#options.store.issueLicense(record, command.issuanceKey, payloadHash);
     if (result.kind === "conflict")
       throw conflict("Issuance key was used with a different payload", "license.issue");
+    if (result.kind === "grant_inactive")
+      throw new PolybillError("Entitlement grant is not active", {
+        code: "conflict",
+        operation: "license.issue",
+        retryable: false,
+      });
     return {
       license: result.record,
       key:
@@ -91,6 +98,15 @@ export class LicenseService {
     text(input.instanceRef, "instance reference");
     text(input.deviceFingerprint, "device fingerprint");
     const normalized = await normalizeSecret(input.key, "PB1", this.#options.crypto);
+    const digest = await this.#options.crypto.digest(normalized);
+    const license = await this.#options.store.findLicense(input.tenantId, digest);
+    if (license === undefined)
+      throw new PolybillError("License activation failed: not_found", {
+        code: "not_found",
+        operation: "license.activate",
+        retryable: false,
+      });
+    await this.#requireActiveGrant(input.tenantId, license.grantId, "license.activate");
     const instance: Omit<LicenseInstance, "licenseId"> = {
       id: parseId<"LicenseInstanceId">(this.#options.ids.next("lins"), "lins"),
       tenantId: input.tenantId,
@@ -101,7 +117,7 @@ export class LicenseService {
     };
     const result = await this.#options.store.activateLicense({
       tenantId: input.tenantId,
-      digest: await this.#options.crypto.digest(normalized),
+      digest,
       instance,
       now: this.#options.clock.now(),
     });
@@ -128,8 +144,40 @@ export class LicenseService {
       Date.parse(found.expiresAt) <= Date.parse(this.#options.clock.now())
     )
       return undefined;
+    const grant = await this.#options.store.getEntitlementGrant(input.tenantId, found.grantId);
+    if (!activeGrant(grant, this.#options.clock.now())) return undefined;
     return found;
   }
+
+  async #requireActiveGrant(
+    tenantId: TenantId,
+    grantId: EntitlementGrantId,
+    operation: string,
+  ): Promise<void> {
+    const grant = await this.#options.store.getEntitlementGrant(tenantId, grantId);
+    if (grant === undefined)
+      throw new PolybillError("Entitlement grant was not found", {
+        code: "not_found",
+        operation,
+        retryable: false,
+      });
+    if (!activeGrant(grant, this.#options.clock.now()))
+      throw new PolybillError("Entitlement grant is not active", {
+        code: "conflict",
+        operation,
+        retryable: false,
+      });
+  }
+}
+
+function activeGrant(
+  grant: Awaited<ReturnType<EntitlementStore["getEntitlementGrant"]>>,
+  now: IsoDateTime,
+): boolean {
+  return (
+    grant?.status === "active" &&
+    (grant.expiresAt === undefined || Date.parse(grant.expiresAt) > Date.parse(now))
+  );
 }
 
 function aad(tenantId: TenantId, licenseId: string): string {
