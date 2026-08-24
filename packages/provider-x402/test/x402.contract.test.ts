@@ -116,6 +116,66 @@ describe("x402 adapter contract", () => {
     });
   });
 
+  it("recovers a response-lost payment ref by its immutable invoice tuple", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "GET",
+        url: "https://pay.example/ref?pay_to=" + PAY_TO + "&limit=100",
+        response: Response.json({
+          items: [
+            {
+              refId: "ref_recovered",
+              payTo: PAY_TO,
+              network: "eip155:8453",
+              asset: "USDC",
+              amount: "25000000",
+              invoiceId: "ord_x4020001",
+              createdAt: NOW_SECONDS,
+              status: "active",
+            },
+          ],
+        }),
+      },
+      {
+        method: "GET",
+        url: "https://pay.example/ref/ref_recovered",
+        response: Response.json({
+          v: 2,
+          scheme: "exact",
+          network: "eip155:8453",
+          payTo: PAY_TO,
+          asset: "USDC",
+          amount: "25000000",
+          resource: "https://pay.example/receive/ref_recovered",
+          invoiceId: "ord_x4020001",
+          mimeType: "application/json",
+        }),
+      },
+    ]);
+    const result = await createX402Adapter(
+      options(createNonceStore()),
+    ).checkout?.recoverByIdempotencyKey?.(
+      context(scripted.fetch),
+      parseIdempotencyKey("x402-recovery-0001"),
+      {
+        orderId: parseId<"OrderId">("ord_x4020001", "ord"),
+        lines: [],
+        grossTotal: money("2500", "USD"),
+        total: money("2500", "USD"),
+        successUrl: "https://merchant.example/success",
+        cancelUrl: "https://merchant.example/cancel",
+        metadata: {},
+      },
+    );
+    expect(result?.value).toMatchObject({
+      externalId: "ref_recovered",
+      status: "open",
+      url: "https://pay.example/receive/ref_recovered",
+      total: money("2500", "USD"),
+    });
+    scripted.assertConsumed();
+  });
+
   it("requires signed receipt and sufficient chain confirmations", async () => {
     const confirmed = createScriptedFetch([
       {

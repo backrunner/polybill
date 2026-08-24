@@ -5,7 +5,7 @@ import type {
   ProviderOperationResult,
 } from "@polybill/adapter-kit";
 import { PolybillError, parseIsoDateTime } from "@polybill/core";
-import { createPaymentRef, getRef } from "x402-paysdk/merchant";
+import { createPaymentRef, getRef, listRefs } from "x402-paysdk/merchant";
 import { InjectedMerchantClient } from "./client.js";
 import type { X402AdapterOptions } from "./config.js";
 
@@ -17,9 +17,7 @@ export function createX402Checkout(options: X402AdapterOptions): CheckoutProvide
           context,
           "x402 fixed settlement only accepts the configured pricing currency",
         );
-      const amount = (
-        BigInt(command.total.amount) * BigInt(options.settlement.atomicPerMinor)
-      ).toString();
+      const amount = toAtomicAmount(command.total.amount, options.settlement.atomicPerMinor);
       const ref = await createPaymentRef(client(context, options), {
         payTo: options.payTo,
         network: options.network,
@@ -56,7 +54,49 @@ export function createX402Checkout(options: X402AdapterOptions): CheckoutProvide
       };
       return result(context, value);
     },
+    async recoverByIdempotencyKey(context, _key, command) {
+      const amount = toAtomicAmount(command.total.amount, options.settlement.atomicPerMinor);
+      let cursor: string | undefined;
+      const seenCursors = new Set<string>();
+      for (let page = 0; page < 100; page += 1) {
+        const refs = await listRefs(client(context, options), {
+          payTo: options.payTo,
+          limit: 100,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        const match = refs.items.find(
+          (item) =>
+            item.invoiceId === command.orderId &&
+            item.network === options.network &&
+            item.payTo.toLowerCase() === options.payTo.toLowerCase() &&
+            item.asset === "USDC" &&
+            item.amount === amount,
+        );
+        if (match !== undefined) {
+          const snapshot = await getRef(client(context, options), match.refId);
+          return result(context, {
+            externalId: match.refId,
+            status: match.status === "revoked" ? "canceled" : "open",
+            url: snapshot.resource,
+            ...(match.expiresAt === undefined
+              ? {}
+              : { expiresAt: parseIsoDateTime(new Date(match.expiresAt * 1000).toISOString()) }),
+            total: command.total,
+            rawStatus: match.status,
+          });
+        }
+        if (refs.nextCursor === undefined) return undefined;
+        if (seenCursors.has(refs.nextCursor)) throw new TypeError("x402 ref cursor repeated");
+        seenCursors.add(refs.nextCursor);
+        cursor = refs.nextCursor;
+      }
+      throw new TypeError("x402 ref recovery exceeded the page limit");
+    },
   };
+}
+
+function toAtomicAmount(amount: string, atomicPerMinor: string): string {
+  return (BigInt(amount) * BigInt(atomicPerMinor)).toString();
 }
 
 function client(context: ProviderContext, options: X402AdapterOptions): InjectedMerchantClient {
