@@ -1,13 +1,19 @@
-import { CheckoutService, type CreateCheckoutCommand } from "@polybill/application";
+import {
+  CheckoutService,
+  DiscountService,
+  type CreateCheckoutCommand,
+} from "@polybill/application";
 import {
   money,
   parseId,
   parseIdempotencyKey,
   type CommercialPolicy,
   type ConnectionRef,
+  type Discount,
+  type DiscountId,
   type Price,
 } from "@polybill/core";
-import { createMemoryStore, type MemoryStore } from "@polybill/store-memory";
+import { createMemoryStore, MemoryStore } from "@polybill/store-memory";
 import { describe, expect, it } from "vitest";
 import {
   createFakeProvider,
@@ -28,10 +34,15 @@ const price: Price = {
   metadata: {},
 };
 
-function command(key = "checkout:test:0001", quantity = 1): CreateCheckoutCommand {
+function command(
+  key = "checkout:test:0001",
+  quantity = 1,
+  discountId?: DiscountId,
+): CreateCheckoutCommand {
   return {
     idempotencyKey: parseIdempotencyKey(key),
     items: [{ priceId: price.id, quantity }],
+    ...(discountId === undefined ? {} : { discountId }),
     successUrl: "https://merchant.example/success",
     cancelUrl: "https://merchant.example/billing",
   };
@@ -148,4 +159,134 @@ describe("checkout application contract", () => {
     expect(right.checkout.url).toContain("second");
     expect(store.commits).toHaveLength(2);
   });
+
+  it("quotes, reserves, and snapshots a mapped canonical discount", async () => {
+    const adapter = createFakeProvider({ discount: true });
+    const { service, store } = setup(adapter);
+    const discount = await createDiscount(store, { maxRedemptions: 1 });
+    store.seedMapping(tenantId, connection("conn_000001").id, "discount", discount.id, "promo_10");
+
+    const result = await service.create(command("checkout:discount:0001", 1, discount.id));
+    expect(result.order).toMatchObject({
+      grossTotal: money("2500", "USD"),
+      discountTotal: money("250", "USD"),
+      total: money("2250", "USD"),
+      discounts: [{ discountId: discount.id, code: "SAVE10", amount: money("250", "USD") }],
+    });
+    expect(result.payment.amount).toEqual(money("2250", "USD"));
+    await expect(
+      service.create(command("checkout:discount:0002", 1, discount.id)),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(adapter.createCount).toBe(1);
+  });
+
+  it("retains a reservation across response loss and finalizes recovery once", async () => {
+    const adapter = createFakeProvider({ discount: true, failAfterCreateOnce: true });
+    const { service, store } = setup(adapter);
+    const discount = await createDiscount(store, { maxRedemptions: 1 });
+    store.seedMapping(tenantId, connection("conn_000001").id, "discount", discount.id, "promo_10");
+    const discounted = command("checkout:discount:unknown", 1, discount.id);
+
+    await expect(service.create(discounted)).rejects.toMatchObject({ code: "outcome_unknown" });
+    await expect(service.create(discounted)).resolves.toMatchObject({
+      order: { total: money("2250", "USD") },
+    });
+    expect(adapter.createCount).toBe(1);
+    await expect(
+      service.create(command("checkout:discount:after-recovery", 1, discount.id)),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("replays an atomic discounted commit after result persistence fails", async () => {
+    const adapter = createFakeProvider({ discount: true });
+    const store = new FailCompleteOnceStore();
+    const { service } = setup(adapter, store);
+    const discount = await createDiscount(store, { maxRedemptions: 1 });
+    store.seedMapping(tenantId, connection("conn_000001").id, "discount", discount.id, "promo_10");
+    const discounted = command("checkout:discount:commit-recovery", 1, discount.id);
+
+    await expect(service.create(discounted)).rejects.toThrow("injected complete failure");
+    await expect(service.create(discounted)).resolves.toMatchObject({
+      order: { total: money("2250", "USD") },
+    });
+    expect(adapter.createCount).toBe(1);
+    expect(store.commits).toHaveLength(1);
+  });
+
+  it("releases an explicitly rejected reservation for a safe retry", async () => {
+    const adapter = createFakeProvider({ discount: true, rejectCreateOnce: true });
+    const { service, store } = setup(adapter);
+    const discount = await createDiscount(store, { maxRedemptions: 1 });
+    store.seedMapping(tenantId, connection("conn_000001").id, "discount", discount.id, "promo_10");
+    const discounted = command("checkout:discount:retry", 1, discount.id);
+
+    await expect(service.create(discounted)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.create(discounted)).resolves.toMatchObject({
+      order: { total: money("2250", "USD") },
+    });
+    expect(adapter.createCount).toBe(1);
+  });
+
+  it("keeps a mismatched provider total unknown without a duplicate create", async () => {
+    const adapter = createFakeProvider({
+      discount: true,
+      mismatchedDiscountTotal: true,
+    });
+    const { service, store } = setup(adapter);
+    const discount = await createDiscount(store);
+    store.seedMapping(tenantId, connection("conn_000001").id, "discount", discount.id, "promo_10");
+    const discounted = command("checkout:discount:mismatch", 1, discount.id);
+
+    await expect(service.create(discounted)).rejects.toMatchObject({ code: "outcome_unknown" });
+    await expect(service.create(discounted)).rejects.toMatchObject({ code: "outcome_unknown" });
+    expect(adapter.createCount).toBe(1);
+    expect(store.commits).toHaveLength(0);
+  });
+
+  it("rejects discount capability and mapping gaps before provider create", async () => {
+    const unsupported = setup(createFakeProvider());
+    const discount = await createDiscount(unsupported.store);
+    await expect(
+      unsupported.service.create(command("checkout:discount:unsupported", 1, discount.id)),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+
+    const unmapped = setup(createFakeProvider({ discount: true }));
+    const unmappedDiscount = await createDiscount(unmapped.store);
+    await expect(
+      unmapped.service.create(command("checkout:discount:unmapped", 1, unmappedDiscount.id)),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+  });
 });
+
+async function createDiscount(
+  store: MemoryStore,
+  limits: { readonly maxRedemptions?: number } = {},
+): Promise<Discount> {
+  return new DiscountService({
+    tenantId,
+    store,
+    crypto: createWebCryptoPort(),
+    ids: new DeterministicIds(),
+    clock: new VirtualClock("2026-08-25T00:00:00.000Z"),
+  }).create({
+    idempotencyKey: parseIdempotencyKey(`discount:create:${limits.maxRedemptions ?? "open"}`),
+    code: "SAVE10",
+    name: "Save ten percent",
+    value: { kind: "percentage", basisPoints: 1_000 },
+    ...(limits.maxRedemptions === undefined ? {} : { maxRedemptions: limits.maxRedemptions }),
+  });
+}
+
+class FailCompleteOnceStore extends MemoryStore {
+  #failed = false;
+
+  override async complete(
+    ...args: Parameters<MemoryStore["complete"]>
+  ): ReturnType<MemoryStore["complete"]> {
+    if (!this.#failed) {
+      this.#failed = true;
+      throw new Error("injected complete failure");
+    }
+    return super.complete(...args);
+  }
+}

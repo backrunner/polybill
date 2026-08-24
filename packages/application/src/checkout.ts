@@ -3,31 +3,26 @@ import type {
   CredentialResolver,
   ProviderAdapter,
   ProviderCheckoutCommand,
-  ProviderCheckoutSnapshot,
   ProviderContext,
-  ProviderOperationResult,
 } from "@polybill/adapter-kit";
 import {
   PolybillError,
   addMoney,
   checkCommercialPolicy,
-  money,
   multiplyMoney,
   parseId,
   parseIsoDateTime,
-  transitionPayment,
-  type CheckoutId,
   type CheckoutSession,
   type CommercialPolicy,
   type ConnectionRef,
   type CustomerId,
+  type DiscountId,
+  type DiscountRedemptionId,
+  type EvidenceId,
   type IdempotencyKey,
-  type IsoDateTime,
   type Money,
   type Order,
-  type OrderId,
   type Payment,
-  type PaymentId,
   type TenantId,
 } from "@polybill/core";
 import {
@@ -38,9 +33,12 @@ import {
   parseStoredPreparedCheckout,
   stableStringify,
   validatedRedirectUrl,
+  type StoredPreparedCheckout,
 } from "./checkout-helpers.js";
 import type { ApplicationStore, IdGenerator, Logger } from "./ports.js";
 import { AdHocCheckoutService, type CreateAdHocCheckoutCommand } from "./ad-hoc-checkout.js";
+import { prepareCheckoutDiscount } from "./checkout-discount.js";
+import { commitRemoteCheckout } from "./checkout-result.js";
 
 export interface CreateCheckoutItem {
   readonly priceId: string;
@@ -51,6 +49,7 @@ export interface CreateCheckoutCommand {
   readonly idempotencyKey: IdempotencyKey;
   readonly customerId?: CustomerId;
   readonly customerEmail?: string;
+  readonly discountId?: DiscountId;
   readonly items: readonly CreateCheckoutItem[];
   readonly successUrl: string;
   readonly cancelUrl: string;
@@ -102,7 +101,7 @@ export class CheckoutService {
     validatedRedirectUrl(command.cancelUrl);
     const context = await this.#context(command.idempotencyKey);
     const capabilities = await this.#options.adapter.getCapabilities(context);
-    this.#assertAvailable(capabilities, command.items.length);
+    this.#assertAvailable(capabilities, command.items.length, command.discountId !== undefined);
 
     const scope = {
       tenantId: this.#options.tenantId,
@@ -132,6 +131,8 @@ export class CheckoutService {
       });
     }
 
+    let discountReservationId: DiscountRedemptionId | undefined;
+    let remoteObserved = false;
     try {
       const checkoutPort = this.#options.adapter.checkout;
       if (checkoutPort === undefined) throw unsupported(this.#options.connection);
@@ -160,16 +161,35 @@ export class CheckoutService {
             retryable: true,
           });
         }
-        return this.#commitRemote(scope, claim.leaseToken, prepared, recovered);
+        remoteObserved = true;
+        return await commitRemoteCheckout(
+          this.#options,
+          scope,
+          claim.leaseToken,
+          prepared,
+          recovered,
+        );
       }
-      const prepared = await this.#prepare(command);
+      const prepared = await this.#prepare(command, payloadHash);
+      discountReservationId = prepared.discountReservationId;
       await this.#options.store.saveRecoveryContext(scope, claim.leaseToken, prepared);
       const remote = await checkoutPort.create(context, prepared.providerCommand);
-      return this.#commitRemote(scope, claim.leaseToken, prepared, remote);
+      remoteObserved = true;
+      return await commitRemoteCheckout(this.#options, scope, claim.leaseToken, prepared, remote);
     } catch (error) {
-      if (error instanceof PolybillError && error.code === "outcome_unknown") {
-        await this.#options.store.markUnknown(scope, claim.leaseToken, error.evidenceRef);
-      } else {
+      if ((error instanceof PolybillError && error.code === "outcome_unknown") || remoteObserved) {
+        if (claim.kind === "claimed")
+          await this.#options.store.markUnknown(
+            scope,
+            claim.leaseToken,
+            error instanceof PolybillError ? error.evidenceRef : undefined,
+          );
+      } else if (claim.kind === "claimed") {
+        if (discountReservationId !== undefined)
+          await this.#options.store.releaseDiscountReservation(
+            this.#options.tenantId,
+            discountReservationId,
+          );
         await this.#options.store.release(scope, claim.leaseToken);
       }
       throw error;
@@ -180,7 +200,7 @@ export class CheckoutService {
     return this.#adHoc.create(command);
   }
 
-  async #prepare(command: CreateCheckoutCommand): Promise<PreparedCheckout> {
+  async #prepare(command: CreateCheckoutCommand, payloadHash: string): Promise<PreparedCheckout> {
     assertCheckoutItems(command.items);
     const lines: ProviderCheckoutCommand["lines"][number][] = [];
     let total: Money | undefined;
@@ -211,6 +231,17 @@ export class CheckoutService {
       });
     }
     if (total === undefined) throw invalidCheckout("Checkout must include at least one line item");
+    const grossTotal = total;
+    const discount =
+      command.discountId === undefined
+        ? undefined
+        : await prepareCheckoutDiscount(
+            this.#options,
+            { ...command, discountId: command.discountId },
+            lines,
+            payloadHash,
+          );
+    total = discount?.net ?? grossTotal;
     const orderId = parseId<"OrderId">(this.#options.ids.next("ord"), "ord");
     const checkoutId = parseId<"CheckoutId">(this.#options.ids.next("chk"), "chk");
     const paymentId = parseId<"PaymentId">(this.#options.ids.next("pay"), "pay");
@@ -218,12 +249,26 @@ export class CheckoutService {
       orderId,
       checkoutId,
       paymentId,
+      commercialTermsRef: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
+      evidenceId: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
       lines,
+      ...(discount === undefined ? {} : { discountReservationId: discount.reservationId }),
       providerCommand: {
         orderId,
         ...(command.customerId === undefined ? {} : { customerId: command.customerId }),
         ...(command.customerEmail === undefined ? {} : { customerEmail: command.customerEmail }),
         lines,
+        grossTotal,
+        ...(discount === undefined
+          ? {}
+          : {
+              discount: {
+                discountId: discount.discount.id,
+                code: discount.discount.code,
+                amount: discount.amount,
+                externalDiscountId: discount.externalDiscountId,
+              },
+            }),
         total,
         successUrl: validatedRedirectUrl(command.successUrl),
         cancelUrl: validatedRedirectUrl(command.cancelUrl),
@@ -235,6 +280,7 @@ export class CheckoutService {
   #assertAvailable(
     snapshot: Awaited<ReturnType<ProviderAdapter["getCapabilities"]>>,
     itemCount: number,
+    hasDiscount: boolean,
   ): void {
     const capability = snapshot.capabilities["checkout.hosted"];
     if (capability?.support !== "native" && capability?.support !== "emulated") {
@@ -251,6 +297,19 @@ export class CheckoutService {
           "Provider does not support multi-item checkout",
         );
       }
+    }
+    if (hasDiscount) {
+      const discount = snapshot.capabilities["checkout.discount"];
+      if (
+        (discount?.support !== "native" && discount?.support !== "emulated") ||
+        !discount.environments.includes(this.#options.connection.environment)
+      )
+        throw unsupported(
+          this.#options.connection,
+          discount?.support === "unsupported"
+            ? discount.reason
+            : "Provider does not support canonical checkout discounts",
+        );
     }
     const violations = checkCommercialPolicy(
       this.#options.commercialPolicy ?? {},
@@ -291,98 +350,11 @@ export class CheckoutService {
   async #hash(command: unknown): Promise<string> {
     return this.#options.crypto.sha256(new TextEncoder().encode(stableStringify(command)));
   }
-
-  async #commitRemote(
-    scope: {
-      readonly tenantId: TenantId;
-      readonly connectionId: ConnectionRef["id"];
-      readonly operation: string;
-      readonly key: IdempotencyKey;
-    },
-    leaseToken: string,
-    prepared: PreparedCheckout,
-    remote: ProviderOperationResult<ProviderCheckoutSnapshot>,
-  ): Promise<CreateCheckoutResult> {
-    const result = this.#toResult(prepared, remote.value, remote.warnings);
-    await this.#options.store.commitCheckout({
-      tenantId: this.#options.tenantId,
-      connectionId: this.#options.connection.id,
-      provider: this.#options.connection.provider,
-      externalCheckoutId: remote.value.externalId,
-      checkout: result.checkout,
-      order: result.order,
-      payment: result.payment,
-      evidenceId: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
-      evidence: remote.evidence,
-      occurredAt: this.#options.clock.now(),
-    });
-    await this.#options.store.complete(scope, leaseToken, result);
-    return result;
-  }
-
-  #toResult(
-    prepared: PreparedCheckout,
-    remote: {
-      readonly externalId: string;
-      readonly status: string;
-      readonly url?: string;
-      readonly expiresAt?: IsoDateTime;
-    },
-    warnings: CreateCheckoutResult["warnings"],
-  ): CreateCheckoutResult {
-    const now = this.#options.clock.now();
-    const checkout: CheckoutSession = {
-      id: prepared.checkoutId,
-      orderId: prepared.orderId,
-      status:
-        remote.status === "complete"
-          ? "complete"
-          : remote.status === "expired"
-            ? "expired"
-            : remote.status === "canceled"
-              ? "canceled"
-              : "open",
-      ...(remote.url === undefined ? {} : { url: remote.url }),
-      ...(remote.expiresAt === undefined ? {} : { expiresAt: remote.expiresAt }),
-    };
-    const order: Order = {
-      id: prepared.orderId,
-      lines: prepared.lines.map((line) => ({
-        skuId: line.skuId,
-        price: line.price,
-        quantity: line.quantity,
-        subtotal: multiplyMoney(line.unitAmount, line.quantity),
-      })),
-      total: prepared.providerCommand.total,
-      paymentStatus: "pending",
-      fulfillmentStatus: "unfulfilled",
-      commercialTermsRef: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
-      createdAt: now,
-    };
-    const pending: Payment = {
-      id: prepared.paymentId,
-      orderId: prepared.orderId,
-      status: "pending",
-      amount: prepared.providerCommand.total,
-      refundedAmount: money("0", prepared.providerCommand.total.currency),
-      evidence: [],
-    };
-    return {
-      checkout,
-      order,
-      payment: remote.status === "complete" ? transitionPayment(pending, "succeeded") : pending,
-      provider: this.#options.connection.provider,
-      warnings,
-    };
-  }
 }
 
-interface PreparedCheckout {
-  readonly orderId: OrderId;
-  readonly checkoutId: CheckoutId;
-  readonly paymentId: PaymentId;
-  readonly lines: ProviderCheckoutCommand["lines"];
-  readonly providerCommand: ProviderCheckoutCommand;
+interface PreparedCheckout extends StoredPreparedCheckout {
+  readonly commercialTermsRef: EvidenceId;
+  readonly evidenceId: EvidenceId;
 }
 
 function unsupported(

@@ -168,6 +168,18 @@ checkout 使用折扣前必须原子 reserve redemption，并把 canonical Disco
 provider discount。远端结果未知时保留 reservation 供 recovery；明确失败时释放；成功后 finalize。
 没有 provider mapping 或无法证明 provider 净额等于 canonical net total 时，必须在 transport 前拒绝。
 
+v1 每个 checkout 最多使用一个 canonical Discount。`Order.grossTotal` 保存 line subtotal 合计，
+`Order.discountTotal` 保存实际折抵金额，`Order.total` 保存应付净额，`Order.discounts` 保存不可变的
+discount ID/code/amount 快照。provider checkout command 同时携带 gross、net、canonical discount
+amount 和 connection-scoped external discount ID；adapter 的 response/read-back 必须返回 provider
+实际 total，application 在提交前逐 currency/minor-unit 比较。
+
+reservation 以 `(tenant, connection, checkout idempotency key)` 唯一，状态为
+`reserved | finalized | released`。`reserved` 与 `finalized` 都占用全局/beneficiary 次数，`released`
+不占用。相同 key/payload 可重放，released reservation 可由同一明确失败的 checkout retry 重新预占；
+不同 payload 必须冲突。checkout/order/payment snapshot 的提交与 reservation finalize 必须由 store
+在同一个原子操作完成，避免远端成功后的进程崩溃留下已扣次数但没有 canonical Order。
+
 ## 5. Subscription aggregate
 
 ```ts
@@ -342,6 +354,7 @@ interface CanonicalBillingEvent<TType extends string, TData> {
 | `polybill_licenses` | key digest and state | tenant + digest |
 | `polybill_license_instances` | activations | license + instance ID |
 | `polybill_voucher_*` | batches, code digest, redemptions | tenant + digest |
+| `polybill_discount_redemptions` | checkout reservation/finalization ledger | tenant + idempotency key |
 | `polybill_migration_*` | plans, items, checkpoints | migration + item key |
 | `polybill_reconciliation_checkpoints` | authoritative refresh cursor | connection + stream |
 | `polybill_audit` | immutable state/command evidence | tenant + sequence |

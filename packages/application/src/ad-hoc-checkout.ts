@@ -77,6 +77,7 @@ export class AdHocCheckoutService {
         this.#options,
       );
 
+    let remoteObserved = false;
     try {
       const checkout = this.#options.adapter.checkout;
       if (checkout === undefined) throw unsupported(this.#options);
@@ -90,16 +91,24 @@ export class AdHocCheckoutService {
           prepared.providerCommand,
         );
         if (recovered === undefined) throw commandError("outcome_unknown", this.#options);
-        return this.#commit(scope, claim.leaseToken, prepared, recovered);
+        remoteObserved = true;
+        return await this.#commit(scope, claim.leaseToken, prepared, recovered);
       }
       const prepared = prepare(command, this.#options);
       await this.#options.store.saveRecoveryContext(scope, claim.leaseToken, prepared);
       const remote = await checkout.create(context, prepared.providerCommand);
-      return this.#commit(scope, claim.leaseToken, prepared, remote);
+      remoteObserved = true;
+      return await this.#commit(scope, claim.leaseToken, prepared, remote);
     } catch (error) {
-      if (error instanceof PolybillError && error.code === "outcome_unknown")
-        await this.#options.store.markUnknown(scope, claim.leaseToken, error.evidenceRef);
-      else await this.#options.store.release(scope, claim.leaseToken);
+      if ((error instanceof PolybillError && error.code === "outcome_unknown") || remoteObserved) {
+        if (claim.kind === "claimed")
+          await this.#options.store.markUnknown(
+            scope,
+            claim.leaseToken,
+            error instanceof PolybillError ? error.evidenceRef : undefined,
+          );
+      } else if (claim.kind === "claimed")
+        await this.#options.store.release(scope, claim.leaseToken);
       throw error;
     }
   }
@@ -162,16 +171,23 @@ export class AdHocCheckoutService {
     const now = this.#options.clock.now();
     const order: Order = {
       id: prepared.orderId,
+      ...(prepared.providerCommand.customerId === undefined
+        ? {}
+        : { customerId: prepared.providerCommand.customerId }),
       lines: prepared.lines.map((line) => ({
         skuId: line.skuId,
         price: line.price,
         quantity: line.quantity,
         subtotal: multiplyMoney(line.unitAmount, line.quantity),
       })),
+      grossTotal: prepared.providerCommand.total,
+      discounts: [],
+      discountTotal: money("0", prepared.providerCommand.total.currency),
       total: prepared.providerCommand.total,
       paymentStatus: "pending",
       fulfillmentStatus: "unfulfilled",
-      commercialTermsRef: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
+      commercialTermsRef:
+        prepared.commercialTermsRef ?? parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
       createdAt: now,
     };
     const pending = {
@@ -204,7 +220,8 @@ export class AdHocCheckoutService {
       checkout: result.checkout,
       order,
       payment: result.payment,
-      evidenceId: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
+      evidenceId:
+        prepared.evidenceId ?? parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
       evidence: remote.evidence,
       occurredAt: now,
     });
@@ -233,12 +250,15 @@ function prepare(
     orderId,
     checkoutId: parseId<"CheckoutId">(options.ids.next("chk"), "chk"),
     paymentId: parseId<"PaymentId">(options.ids.next("pay"), "pay"),
+    commercialTermsRef: parseId<"EvidenceId">(options.ids.next("evi"), "evi"),
+    evidenceId: parseId<"EvidenceId">(options.ids.next("evi"), "evi"),
     lines,
     providerCommand: {
       orderId,
       ...(command.customerId === undefined ? {} : { customerId: command.customerId }),
       ...(command.customerEmail === undefined ? {} : { customerEmail: command.customerEmail }),
       lines,
+      grossTotal: total,
       total,
       successUrl: validatedRedirectUrl(command.successUrl),
       cancelUrl: validatedRedirectUrl(command.cancelUrl),

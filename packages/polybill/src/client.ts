@@ -19,7 +19,6 @@ import {
   ResourceRuntime,
   SubscriptionService,
   type ApplicationStore,
-  type DiscountStore,
   type IdGenerator,
   type Logger,
 } from "@polybill/application";
@@ -58,9 +57,6 @@ export interface PolybillOptions {
     readonly store: LicensingStore;
     readonly crypto: SecretCrypto;
   };
-  readonly discounts?: {
-    readonly store: DiscountStore;
-  };
   readonly migration?: {
     readonly store: MigrationStore;
     readonly target: MigrationTarget;
@@ -85,7 +81,7 @@ export interface PolybillClient {
   readonly refunds: RefundService;
   readonly subscriptions: SubscriptionService;
   readonly reconcile: ReconciliationService;
-  readonly discounts: DiscountService | undefined;
+  readonly discounts: DiscountService;
   readonly entitlements: EntitlementService | undefined;
   readonly licenses: LicenseService | undefined;
   readonly vouchers: VoucherService | undefined;
@@ -127,16 +123,13 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
           ids,
           clock,
         });
-  const discounts =
-    options.discounts === undefined
-      ? undefined
-      : new DiscountService({
-          tenantId: options.tenantId,
-          store: options.discounts.store,
-          crypto,
-          ids,
-          clock,
-        });
+  const discounts = new DiscountService({
+    tenantId: options.tenantId,
+    store: options.store,
+    crypto,
+    ids,
+    clock,
+  });
   const licenses =
     options.licensing === undefined
       ? undefined

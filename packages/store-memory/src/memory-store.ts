@@ -1,12 +1,15 @@
 import type {
   ApplicationStore,
   CheckoutCommit,
+  DiscountReservation,
   IdempotencyClaim,
   IdempotencyScope,
   ResourceCommit,
   ReconciliationTarget,
+  ReserveDiscountResult,
 } from "@polybill/application";
-import type { CheckoutSession, Price, TenantId } from "@polybill/core";
+import type { CheckoutSession, DiscountRedemptionId, Price, TenantId } from "@polybill/core";
+import { MemoryDiscountStore } from "./discount-store.js";
 
 interface IdempotencyRecord {
   readonly payloadHash: string;
@@ -17,7 +20,7 @@ interface IdempotencyRecord {
   evidence?: string;
 }
 
-export class MemoryStore implements ApplicationStore {
+export class MemoryStore extends MemoryDiscountStore implements ApplicationStore {
   readonly #idempotency = new Map<string, IdempotencyRecord>();
   readonly #prices = new Map<string, Price>();
   readonly #checkouts = new Map<string, CheckoutSession>();
@@ -26,6 +29,7 @@ export class MemoryStore implements ApplicationStore {
   readonly #mappingRecords = new Map<string, ReconciliationTarget>();
   readonly #reconciliationCheckpoints = new Map<string, { cursor?: string; sequence: number }>();
   readonly #resources = new Map<string, unknown>();
+  readonly #discountReservations = new Map<string, DiscountReservation>();
   readonly #commits: CheckoutCommit[] = [];
   #leaseSequence = 0;
 
@@ -200,12 +204,32 @@ export class MemoryStore implements ApplicationStore {
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
     const checkoutKey = `${commit.tenantId}:${commit.checkout.id}`;
     const mappingKey = `${commit.connectionId}:${commit.externalCheckoutId}`;
+    const previous = this.#commits.find(
+      (item) => item.tenantId === commit.tenantId && item.checkout.id === commit.checkout.id,
+    );
+    if (previous !== undefined) {
+      if (sameCheckoutCommit(previous, commit)) return;
+      throw new Error("Checkout already exists with different canonical data");
+    }
     if (this.#checkouts.has(checkoutKey)) throw new Error("Checkout already exists");
     if (
       this.#commits.some((item) => `${item.connectionId}:${item.externalCheckoutId}` === mappingKey)
     ) {
       throw new Error("External checkout mapping already exists");
     }
+    const reservation =
+      commit.discountReservationId === undefined
+        ? undefined
+        : this.#discountReservations.get(`${commit.tenantId}:${commit.discountReservationId}`);
+    if (
+      commit.discountReservationId !== undefined &&
+      (reservation === undefined ||
+        reservation.status !== "reserved" ||
+        reservation.connectionId !== commit.connectionId ||
+        commit.order.discounts.length !== 1 ||
+        commit.order.discounts[0]?.discountId !== reservation.discountId)
+    )
+      throw new Error("Discount reservation cannot be finalized");
     this.#checkouts.set(checkoutKey, globalThis.structuredClone(commit.checkout));
     this.#resources.set(
       `${commit.tenantId}:order:${commit.order.id}`,
@@ -216,6 +240,75 @@ export class MemoryStore implements ApplicationStore {
       globalThis.structuredClone(commit.payment),
     );
     this.#commits.push(globalThis.structuredClone(commit));
+    if (reservation !== undefined)
+      this.#discountReservations.set(`${commit.tenantId}:${reservation.id}`, {
+        ...reservation,
+        status: "finalized",
+        finalizedAt: commit.occurredAt,
+        orderId: commit.order.id,
+      });
+  }
+
+  async reserveDiscount(
+    input: Parameters<ApplicationStore["reserveDiscount"]>[0],
+  ): Promise<ReserveDiscountResult> {
+    const idempotencyKey = `${input.tenantId}:${input.connectionId}:${input.idempotencyKey}`;
+    const existing = [...this.#discountReservations.values()].find(
+      (reservation) =>
+        `${reservation.tenantId}:${reservation.connectionId}:${reservation.idempotencyKey}` ===
+        idempotencyKey,
+    );
+    if (existing !== undefined && existing.payloadHash !== input.payloadHash)
+      return { kind: "conflict" };
+    if (existing !== undefined && existing.status !== "released")
+      return { kind: "replay", reservation: globalThis.structuredClone(existing) };
+    const discount = await this.getDiscount(input.tenantId, input.discountId);
+    if (discount === undefined) return { kind: "not_found" };
+    if (discount.status !== "active") return { kind: "inactive" };
+
+    const active = [...this.#discountReservations.values()].filter(
+      (reservation) =>
+        reservation.tenantId === input.tenantId &&
+        reservation.discountId === input.discountId &&
+        reservation.status !== "released",
+    );
+    const redemptionCountBefore = active.length;
+    const customerRedemptionCountBefore =
+      input.customerRef === undefined
+        ? 0
+        : active.filter((reservation) => reservation.customerRef === input.customerRef).length;
+    if (
+      (input.maxRedemptions !== undefined && redemptionCountBefore >= input.maxRedemptions) ||
+      (input.maxRedemptionsPerCustomer !== undefined &&
+        customerRedemptionCountBefore >= input.maxRedemptionsPerCustomer)
+    )
+      return { kind: "limit_reached" };
+
+    const reservation: DiscountReservation = {
+      id: existing?.id ?? input.reservationId,
+      tenantId: input.tenantId,
+      connectionId: input.connectionId,
+      discountId: input.discountId,
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.payloadHash,
+      ...(input.customerRef === undefined ? {} : { customerRef: input.customerRef }),
+      status: "reserved",
+      redemptionCountBefore,
+      customerRedemptionCountBefore,
+      reservedAt: input.reservedAt,
+    };
+    this.#discountReservations.set(`${input.tenantId}:${reservation.id}`, reservation);
+    return { kind: "reserved", reservation: globalThis.structuredClone(reservation) };
+  }
+
+  async releaseDiscountReservation(
+    tenantId: TenantId,
+    reservationId: DiscountRedemptionId,
+  ): Promise<void> {
+    const key = `${tenantId}:${reservationId}`;
+    const reservation = this.#discountReservations.get(key);
+    if (reservation?.status === "reserved")
+      this.#discountReservations.set(key, { ...reservation, status: "released" });
   }
 
   async getCheckout(tenantId: TenantId, checkoutId: string): Promise<CheckoutSession | undefined> {
@@ -241,4 +334,15 @@ function scopeKey(scope: IdempotencyScope): string {
 
 function cursor(target: ReconciliationTarget): string {
   return `${target.entityType}:${target.entityId}`;
+}
+
+function sameCheckoutCommit(left: CheckoutCommit, right: CheckoutCommit): boolean {
+  return (
+    left.connectionId === right.connectionId &&
+    left.externalCheckoutId === right.externalCheckoutId &&
+    left.discountReservationId === right.discountReservationId &&
+    JSON.stringify(left.checkout) === JSON.stringify(right.checkout) &&
+    JSON.stringify(left.order) === JSON.stringify(right.order) &&
+    JSON.stringify(left.payment) === JSON.stringify(right.payment)
+  );
 }

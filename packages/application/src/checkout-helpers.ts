@@ -1,7 +1,13 @@
 import { PolybillError, money, type Money, type PriceModel } from "@polybill/core";
 import type { CreateCheckoutResult } from "./checkout.js";
 import type { ProviderCheckoutCommand } from "@polybill/adapter-kit";
-import type { CheckoutId, OrderId, PaymentId } from "@polybill/core";
+import type {
+  CheckoutId,
+  DiscountRedemptionId,
+  EvidenceId,
+  OrderId,
+  PaymentId,
+} from "@polybill/core";
 
 export function fixedUnitAmount(model: PriceModel): Money {
   if (model.kind === "free") return money("0", model.currency);
@@ -80,6 +86,9 @@ export interface StoredPreparedCheckout {
   readonly checkoutId: CheckoutId;
   readonly paymentId: PaymentId;
   readonly lines: ProviderCheckoutCommand["lines"];
+  readonly discountReservationId?: DiscountRedemptionId;
+  readonly commercialTermsRef?: EvidenceId;
+  readonly evidenceId?: EvidenceId;
   readonly providerCommand: ProviderCheckoutCommand;
 }
 
@@ -91,7 +100,10 @@ export function parseStoredPreparedCheckout(value: unknown): StoredPreparedCheck
     !("checkoutId" in value) ||
     !("paymentId" in value) ||
     !("lines" in value) ||
-    !("providerCommand" in value)
+    !("providerCommand" in value) ||
+    typeof value.providerCommand !== "object" ||
+    value.providerCommand === null ||
+    !("total" in value.providerCommand)
   ) {
     throw new PolybillError("Stored recovery context is invalid", {
       code: "provider_response_invalid",
@@ -99,5 +111,15 @@ export function parseStoredPreparedCheckout(value: unknown): StoredPreparedCheck
       retryable: false,
     });
   }
-  return value as unknown as StoredPreparedCheckout;
+  const providerCommand = value.providerCommand as unknown as Record<string, unknown>;
+  return {
+    ...(value as unknown as StoredPreparedCheckout),
+    providerCommand: {
+      ...(providerCommand as unknown as ProviderCheckoutCommand),
+      grossTotal:
+        "grossTotal" in providerCommand
+          ? (providerCommand.grossTotal as ProviderCheckoutCommand["grossTotal"])
+          : (providerCommand.total as ProviderCheckoutCommand["total"]),
+    },
+  };
 }

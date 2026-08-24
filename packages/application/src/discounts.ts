@@ -12,35 +12,8 @@ import {
   type SkuId,
   type TenantId,
 } from "@polybill/core";
+import type { DiscountStore } from "./discount-ports.js";
 import type { IdGenerator } from "./ports.js";
-
-export type CreateDiscountResult =
-  | { readonly kind: "created"; readonly discount: Discount }
-  | { readonly kind: "replay"; readonly discount: Discount }
-  | { readonly kind: "conflict" };
-
-export type ArchiveDiscountResult =
-  | { readonly kind: "archived"; readonly discount: Discount }
-  | { readonly kind: "replay"; readonly discount: Discount }
-  | { readonly kind: "not_found" }
-  | { readonly kind: "conflict" };
-
-export interface DiscountStore {
-  createDiscount(
-    tenantId: TenantId,
-    discount: Discount,
-    idempotencyKey: IdempotencyKey,
-    payloadHash: string,
-  ): Promise<CreateDiscountResult>;
-  getDiscount(tenantId: TenantId, discountId: DiscountId): Promise<Discount | undefined>;
-  findDiscountByCode(tenantId: TenantId, code: string): Promise<Discount | undefined>;
-  archiveDiscount(input: {
-    readonly tenantId: TenantId;
-    readonly discountId: DiscountId;
-    readonly idempotencyKey: IdempotencyKey;
-    readonly payloadHash: string;
-  }): Promise<ArchiveDiscountResult>;
-}
 
 export interface DiscountServiceOptions {
   readonly tenantId: TenantId;

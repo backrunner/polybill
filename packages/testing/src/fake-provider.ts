@@ -20,7 +20,10 @@ export interface FakeProviderOptions {
   readonly commercialModel?: "merchant_of_record" | "payment_processor" | "settlement_network";
   readonly hostedCheckout?: boolean;
   readonly multiItem?: boolean;
+  readonly discount?: boolean;
   readonly failAfterCreateOnce?: boolean;
+  readonly rejectCreateOnce?: boolean;
+  readonly mismatchedDiscountTotal?: boolean;
 }
 
 export interface FakeProvider extends ProviderAdapter {
@@ -37,6 +40,7 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
   const refunds = new Map<string, ProviderRefundSnapshot>();
   let createCount = 0;
   let failAfterCreate = options.failAfterCreateOnce ?? false;
+  let rejectCreate = options.rejectCreateOnce ?? false;
   const id = options.id ?? "default";
 
   function result<T extends { readonly externalId: string; readonly rawStatus?: string }>(
@@ -81,6 +85,10 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
           "checkout.hosted": hosted,
           "checkout.ad_hoc_price": nativeCapability(),
           "checkout.multi_item": multi,
+          "checkout.discount":
+            options.discount === true
+              ? nativeCapability()
+              : unsupportedCapability("fake discount disabled"),
           "catalog.product.read": nativeCapability(),
           "catalog.product.create": nativeCapability(),
           "catalog.product.update": nativeCapability(),
@@ -199,6 +207,15 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
     },
     checkout: {
       async create(context, command) {
+        if (rejectCreate) {
+          rejectCreate = false;
+          throw new PolybillError("Fake checkout was explicitly rejected", {
+            code: "invalid_request",
+            operation: "checkout.create",
+            provider: "fake",
+            retryable: false,
+          });
+        }
         const key = context.idempotencyKey;
         if (key !== undefined) {
           const existing = byKey.get(key);
@@ -210,6 +227,10 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
           externalId,
           status: "open",
           url: `https://checkout.fake.invalid/${externalId}`,
+          total:
+            options.mismatchedDiscountTotal === true && command.discount !== undefined
+              ? money("1", command.total.currency)
+              : command.total,
           rawStatus: "created",
         };
         checkouts.set(externalId, snapshot);
@@ -223,7 +244,6 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
             retryable: true,
           });
         }
-        void command;
         return result(context, snapshot);
       },
       async get(context, externalId) {

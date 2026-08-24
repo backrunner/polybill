@@ -2,6 +2,7 @@ import type {
   AssetAmount,
   CanonicalBillingEvent,
   CustomerId,
+  DiscountId,
   Environment,
   IsoDateTime,
   Money,
@@ -62,6 +63,13 @@ export interface ProviderCheckoutCommand {
   readonly customerId?: CustomerId;
   readonly customerEmail?: string;
   readonly lines: readonly ProviderCheckoutLine[];
+  readonly grossTotal: Money;
+  readonly discount?: {
+    readonly discountId: DiscountId;
+    readonly code: string;
+    readonly amount: Money;
+    readonly externalDiscountId: string;
+  };
   readonly total: Money;
   readonly successUrl: string;
   readonly cancelUrl: string;
@@ -73,6 +81,7 @@ export interface ProviderCheckoutSnapshot {
   readonly status: "open" | "complete" | "expired" | "canceled" | "unknown";
   readonly url?: string;
   readonly expiresAt?: IsoDateTime;
+  readonly total?: Money;
   readonly rawStatus: string;
 }
 

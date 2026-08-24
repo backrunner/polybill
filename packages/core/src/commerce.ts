@@ -2,6 +2,7 @@ import type { PriceModel } from "./catalog.js";
 import type {
   CheckoutId,
   CustomerId,
+  DiscountId,
   EvidenceId,
   OrderId,
   PaymentId,
@@ -29,6 +30,12 @@ export interface OrderLineSnapshot {
   readonly subtotal: Money;
 }
 
+export interface OrderDiscountSnapshot {
+  readonly discountId: DiscountId;
+  readonly code: string;
+  readonly amount: Money;
+}
+
 export type OrderPaymentStatus =
   "pending" | "paid" | "partially_refunded" | "refunded" | "failed" | "canceled" | "disputed";
 
@@ -39,6 +46,9 @@ export interface Order {
   readonly externalId?: string;
   readonly customerId?: CustomerId;
   readonly lines: readonly OrderLineSnapshot[];
+  readonly grossTotal: Money;
+  readonly discounts: readonly OrderDiscountSnapshot[];
+  readonly discountTotal: Money;
   readonly total: Money;
   readonly paymentStatus: OrderPaymentStatus;
   readonly fulfillmentStatus: FulfillmentStatus;

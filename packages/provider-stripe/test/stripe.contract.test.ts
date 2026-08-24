@@ -57,6 +57,7 @@ describe("Stripe adapter contract", () => {
           unitAmount: money("1250", "USD"),
         },
       ],
+      grossTotal: money("2500", "USD"),
       total: money("2500", "USD"),
       successUrl: "https://merchant.example/success",
       cancelUrl: "https://merchant.example/cancel",

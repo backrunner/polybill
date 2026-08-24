@@ -1,6 +1,7 @@
 import type {
   CheckoutSession,
   ConnectionId,
+  DiscountRedemptionId,
   EvidenceId,
   IdempotencyKey,
   IsoDateTime,
@@ -10,6 +11,7 @@ import type {
   ProviderName,
   TenantId,
 } from "@polybill/core";
+import type { DiscountRedemptionStore, DiscountStore } from "./discount-ports.js";
 
 export interface IdempotencyScope {
   readonly tenantId: TenantId;
@@ -119,6 +121,7 @@ export interface CheckoutCommit {
   readonly evidenceId: EvidenceId;
   readonly evidence: unknown;
   readonly occurredAt: IsoDateTime;
+  readonly discountReservationId?: DiscountRedemptionId;
 }
 
 export interface CheckoutStore {
@@ -133,7 +136,9 @@ export interface ApplicationStore
     MappingReader,
     CheckoutStore,
     CanonicalResourceStore,
-    ReconciliationStore {}
+    ReconciliationStore,
+    DiscountStore,
+    DiscountRedemptionStore {}
 
 export interface IdGenerator {
   next(prefix: string): string;

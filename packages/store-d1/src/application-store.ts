@@ -1,13 +1,29 @@
 import type {
   ApplicationStore,
+  ArchiveDiscountResult,
   CheckoutCommit,
+  CreateDiscountResult,
+  DiscountStore,
   IdempotencyClaim,
   IdempotencyScope,
   ResourceCommit,
   ReconciliationTarget,
+  ReserveDiscountResult,
 } from "@polybill/application";
-import type { CheckoutSession, Price, TenantId } from "@polybill/core";
+import type {
+  CheckoutSession,
+  Discount,
+  DiscountId,
+  DiscountRedemptionId,
+  IdempotencyKey,
+  Price,
+  TenantId,
+} from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
+import { decodeCheckout, decodePrice, parseStored } from "./application-codecs.js";
+import { commitCheckoutToD1 } from "./checkout-commit.js";
+import { D1DiscountRedemptionStore } from "./discount-redemption-store.js";
+import { D1DiscountStore } from "./discount-store.js";
 
 interface IdempotencyRow {
   readonly payload_hash: string;
@@ -25,10 +41,14 @@ export interface D1ApplicationStoreOptions {
 export class D1ApplicationStore implements ApplicationStore {
   readonly #db: D1DatabaseLike;
   readonly #leaseToken: () => string;
+  readonly #discounts: D1DiscountStore;
+  readonly #discountRedemptions: D1DiscountRedemptionStore;
 
   constructor(db: D1DatabaseLike, options: D1ApplicationStoreOptions = {}) {
     this.#db = db;
     this.#leaseToken = options.leaseToken ?? (() => `lease_${globalThis.crypto.randomUUID()}`);
+    this.#discounts = new D1DiscountStore(db);
+    this.#discountRedemptions = new D1DiscountRedemptionStore(db);
   }
 
   async claim(scope: IdempotencyScope, payloadHash: string): Promise<IdempotencyClaim> {
@@ -116,6 +136,42 @@ export class D1ApplicationStore implements ApplicationStore {
       .bind(tenantId, priceId)
       .first<{ value: string }>();
     return snapshot === null ? undefined : decodePrice(snapshot.value);
+  }
+
+  createDiscount(
+    tenantId: TenantId,
+    discount: Discount,
+    idempotencyKey: IdempotencyKey,
+    payloadHash: string,
+  ): Promise<CreateDiscountResult> {
+    return this.#discounts.createDiscount(tenantId, discount, idempotencyKey, payloadHash);
+  }
+
+  getDiscount(tenantId: TenantId, discountId: DiscountId): Promise<Discount | undefined> {
+    return this.#discounts.getDiscount(tenantId, discountId);
+  }
+
+  findDiscountByCode(tenantId: TenantId, code: string): Promise<Discount | undefined> {
+    return this.#discounts.findDiscountByCode(tenantId, code);
+  }
+
+  archiveDiscount(
+    input: Parameters<DiscountStore["archiveDiscount"]>[0],
+  ): Promise<ArchiveDiscountResult> {
+    return this.#discounts.archiveDiscount(input);
+  }
+
+  reserveDiscount(
+    input: Parameters<ApplicationStore["reserveDiscount"]>[0],
+  ): Promise<ReserveDiscountResult> {
+    return this.#discountRedemptions.reserveDiscount(input);
+  }
+
+  releaseDiscountReservation(
+    tenantId: TenantId,
+    reservationId: DiscountRedemptionId,
+  ): Promise<void> {
+    return this.#discountRedemptions.releaseDiscountReservation(tenantId, reservationId);
   }
 
   async getExternalId(
@@ -277,51 +333,7 @@ export class D1ApplicationStore implements ApplicationStore {
   }
 
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
-    await this.#db.batch([
-      this.#db
-        .prepare(
-          "INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, 'checkout', ?, ?, 1, 'created')",
-        )
-        .bind(commit.tenantId, commit.connectionId, commit.checkout.id, commit.externalCheckoutId),
-      this.#db
-        .prepare(
-          "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, 'checkout', ?, 1, ?, ?)",
-        )
-        .bind(
-          commit.tenantId,
-          commit.checkout.id,
-          commit.occurredAt,
-          JSON.stringify(commit.checkout),
-        ),
-      this.#db
-        .prepare(
-          "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, 'order', ?, 1, ?, ?)",
-        )
-        .bind(commit.tenantId, commit.order.id, commit.occurredAt, JSON.stringify(commit.order)),
-      this.#db
-        .prepare(
-          "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, 'payment', ?, 1, ?, ?)",
-        )
-        .bind(
-          commit.tenantId,
-          commit.payment.id,
-          commit.occurredAt,
-          JSON.stringify(commit.payment),
-        ),
-      this.#db
-        .prepare(
-          "INSERT INTO polybill_audit (tenant_id, operation, evidence, occurred_at) VALUES (?, 'checkout.commit', ?, ?)",
-        )
-        .bind(
-          commit.tenantId,
-          JSON.stringify({
-            evidenceId: commit.evidenceId,
-            provider: commit.provider,
-            value: commit.evidence,
-          }),
-          commit.occurredAt,
-        ),
-    ]);
+    await commitCheckoutToD1(this.#db, commit);
   }
 
   async getCheckout(tenantId: TenantId, checkoutId: string): Promise<CheckoutSession | undefined> {
@@ -355,46 +367,6 @@ export class D1ApplicationStore implements ApplicationStore {
       .run();
     assertOwned(result);
   }
-}
-
-function decodePrice(value: string): Price {
-  const parsed = parseStored(value, "catalog price");
-  if (
-    !record(parsed) ||
-    typeof parsed.id !== "string" ||
-    typeof parsed.skuId !== "string" ||
-    typeof parsed.version !== "number" ||
-    !record(parsed.model) ||
-    typeof parsed.model.kind !== "string" ||
-    (parsed.status !== "active" && parsed.status !== "retired")
-  )
-    throw new TypeError("Stored D1 catalog price is invalid");
-  return parsed as unknown as Price;
-}
-
-function decodeCheckout(value: string): CheckoutSession {
-  const parsed = parseStored(value, "checkout snapshot");
-  if (
-    !record(parsed) ||
-    typeof parsed.id !== "string" ||
-    typeof parsed.orderId !== "string" ||
-    !["open", "complete", "expired", "canceled"].includes(String(parsed.status))
-  )
-    throw new TypeError("Stored D1 checkout snapshot is invalid");
-  return parsed as unknown as CheckoutSession;
-}
-
-function parseStored(value: string | null, name: string): unknown {
-  if (value === null) return undefined;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new TypeError(`Stored D1 ${name} is invalid JSON`);
-  }
-}
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function changes(result: D1Result): number {

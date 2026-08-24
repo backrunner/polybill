@@ -86,6 +86,11 @@ payment.one_time/payment.asset_settlement/refund.partial/refund.full/dispute.rea
 subscription.create/read/list/change_items/pause/resume/cancel/proration/trial/mandate
 commercial.merchant_of_record/tax_calculation/tax_invoice/dispute_responsibility
 discount.create/redeem
+
+`checkout.discount` 只有在 adapter 能把 connection-scoped external discount ID 写入请求，并从
+create response 或紧随其后的 authoritative read-back 返回实际 checkout total 时才可声明
+`native`。application 会比较 provider total 与 canonical net total；缺字段、币种或金额不一致均为
+未知结果并保留 redemption reservation 供 reconcile，不能把请求已发送后的异常当成明确失败释放。
 license.issue/validate/activate/deactivate/revoke
 usage.meter/ingest/credit
 webhook.verify/replay/simulate

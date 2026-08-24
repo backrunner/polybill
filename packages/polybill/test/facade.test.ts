@@ -1,10 +1,6 @@
 import { createPolybill, createWebSecretCrypto } from "../src/index.js";
-import { money, parseId, parseIdempotencyKey, type Price } from "@polybill/core";
-import {
-  createMemoryDiscountStore,
-  createMemoryLicensingStore,
-  createMemoryStore,
-} from "@polybill/store-memory";
+import { money, parseId, parseIdempotencyKey, parseIsoDateTime, type Price } from "@polybill/core";
+import { createMemoryLicensingStore, createMemoryStore } from "@polybill/store-memory";
 import {
   createFakeProvider,
   createWebCryptoPort,
@@ -80,7 +76,30 @@ describe("polybill facade", () => {
           encryptionKeys: { "test-key": new Uint8Array(32).fill(22) },
         }),
       },
-      discounts: { store: createMemoryDiscountStore() },
+    });
+    const legacyOrderId = parseId<"OrderId">("ord_legacyfacade", "ord");
+    await store.commitResource({
+      tenantId,
+      connectionId: connection.id,
+      provider: "fake",
+      entityType: "order",
+      entityId: legacyOrderId,
+      value: {
+        id: legacyOrderId,
+        lines: [],
+        total: money("500", "USD"),
+        paymentStatus: "paid",
+        fulfillmentStatus: "fulfilled",
+        commercialTermsRef: parseId<"EvidenceId">("evi_legacyfacade", "evi"),
+        createdAt: parseIsoDateTime("2026-08-24T00:00:00.000Z"),
+      },
+      occurredAt: parseIsoDateTime("2026-08-25T00:00:00.000Z"),
+    });
+    await expect(client.orders.get(legacyOrderId)).resolves.toMatchObject({
+      grossTotal: money("500", "USD"),
+      discounts: [],
+      discountTotal: money("0", "USD"),
+      total: money("500", "USD"),
     });
     const productCommand = {
       idempotencyKey: parseIdempotencyKey("facade:product:0001"),
@@ -211,7 +230,6 @@ describe("polybill facade", () => {
     expect(adHoc.order.total).toEqual(money("700", "USD"));
 
     const discountService = client.discounts;
-    if (discountService === undefined) throw new Error("Expected configured discount service");
     const discount = await discountService.create({
       idempotencyKey: parseIdempotencyKey("facade:discount:create:0001"),
       code: "WELCOME10",

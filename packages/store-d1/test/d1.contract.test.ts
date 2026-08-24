@@ -89,6 +89,7 @@ describe("D1 control-plane contract", () => {
     await binding.exec(await migration("0005_entitlements.sql"));
     await binding.exec(await migration("0006_entitlement_beneficiaries.sql"));
     await binding.exec(await migration("0007_discounts.sql"));
+    await binding.exec(await migration("0008_discount_redemptions.sql"));
   });
 
   afterEach(async () => {
@@ -162,7 +163,7 @@ describe("D1 control-plane contract", () => {
       refundedAmount: money("0", "USD"),
       evidence: [],
     };
-    await store.commitCheckout({
+    const commit = {
       tenantId,
       connectionId,
       provider: "stripe",
@@ -173,7 +174,9 @@ describe("D1 control-plane contract", () => {
       evidenceId: parseId<"EvidenceId">("evi_d1contract", "evi"),
       evidence: { requestId: "req_external" },
       occurredAt: now,
-    });
+    } as const;
+    await store.commitCheckout(commit);
+    await expect(store.commitCheckout(commit)).resolves.toBeUndefined();
     await expect(store.getCheckout(tenantId, checkout.id)).resolves.toEqual(checkout);
     await expect(store.getResource(tenantId, "payment", payment.id)).resolves.toEqual(payment);
     await expect(
@@ -329,6 +332,17 @@ describe("D1 control-plane contract", () => {
     expect(archived).toHaveLength(2);
     expect(archived.every((discount) => discount.status === "archived")).toBe(true);
     await expect(service.archive(created.id, firstArchiveKey)).resolves.toEqual(archived[0]);
+    await expect(
+      new D1ApplicationStore(db).reserveDiscount({
+        tenantId,
+        connectionId,
+        reservationId: parseId<"DiscountRedemptionId">("dred_archived001", "dred"),
+        discountId: created.id,
+        idempotencyKey: parseIdempotencyKey("d1-archived-reservation"),
+        payloadHash: "archived-payload",
+        reservedAt: now,
+      }),
+    ).resolves.toEqual({ kind: "inactive" });
   });
 
   it("rejects malformed persisted discounts at the D1 boundary", async () => {
@@ -352,6 +366,124 @@ describe("D1 control-plane contract", () => {
         parseId<"DiscountId">("disc_malformed01", "disc"),
       ),
     ).rejects.toThrow("Stored D1 discount is invalid");
+  });
+
+  it("atomically reserves a globally limited discount under contention", async () => {
+    const store = new D1ApplicationStore(db);
+    const discount = await new DiscountService({
+      tenantId,
+      store,
+      crypto: createWebCryptoPort(),
+      ids: new DeterministicIds(),
+      clock: new VirtualClock(now),
+    }).create({
+      idempotencyKey: parseIdempotencyKey("d1-limited-discount-create"),
+      code: "LIMITONE",
+      name: "Only once",
+      value: { kind: "percentage", basisPoints: 1_000 },
+      maxRedemptions: 1,
+    });
+    const attempts = await Promise.all(
+      Array.from({ length: 100 }, (_, index) =>
+        store.reserveDiscount({
+          tenantId,
+          connectionId,
+          reservationId: parseId<"DiscountRedemptionId">(
+            `dred_${String(index).padStart(12, "0")}`,
+            "dred",
+          ),
+          discountId: discount.id,
+          idempotencyKey: parseIdempotencyKey(
+            `d1-discount-reserve-${String(index).padStart(4, "0")}`,
+          ),
+          payloadHash: `payload-${index}`,
+          maxRedemptions: 1,
+          reservedAt: now,
+        }),
+      ),
+    );
+    expect(attempts.filter((result) => result.kind === "reserved")).toHaveLength(1);
+    expect(attempts.filter((result) => result.kind === "limit_reached")).toHaveLength(99);
+  });
+
+  it("atomically finalizes a discount reservation with checkout snapshots", async () => {
+    const store = new D1ApplicationStore(db);
+    const discount = await new DiscountService({
+      tenantId,
+      store,
+      crypto: createWebCryptoPort(),
+      ids: new DeterministicIds(),
+      clock: new VirtualClock(now),
+    }).create({
+      idempotencyKey: parseIdempotencyKey("d1-finalize-discount-create"),
+      code: "FINALIZE",
+      name: "Finalize",
+      value: { kind: "fixed", amount: money("500", "USD") },
+    });
+    const reservationId = parseId<"DiscountRedemptionId">("dred_finalize001", "dred");
+    await expect(
+      store.reserveDiscount({
+        tenantId,
+        connectionId,
+        reservationId,
+        discountId: discount.id,
+        idempotencyKey: parseIdempotencyKey("d1-finalize-reservation"),
+        payloadHash: "finalize-payload",
+        reservedAt: now,
+      }),
+    ).resolves.toMatchObject({ kind: "reserved" });
+    const price = fixturePrice();
+    const checkout: CheckoutSession = {
+      id: parseId<"CheckoutId">("chk_discountfinal", "chk"),
+      orderId: parseId<"OrderId">("ord_discountfinal", "ord"),
+      status: "open",
+      url: "https://checkout.example/discount",
+    };
+    const order: Order = {
+      ...fixtureOrder(checkout.orderId, price),
+      grossTotal: money("2500", "USD"),
+      discounts: [{ discountId: discount.id, code: discount.code, amount: money("500", "USD") }],
+      discountTotal: money("500", "USD"),
+      total: money("2000", "USD"),
+    };
+    const payment: Payment = {
+      id: parseId<"PaymentId">("pay_discountfinal", "pay"),
+      orderId: order.id,
+      status: "pending",
+      amount: order.total,
+      refundedAmount: money("0", "USD"),
+      evidence: [],
+    };
+    const commit = {
+      tenantId,
+      connectionId,
+      provider: "stripe" as const,
+      externalCheckoutId: "cs_discount_final",
+      checkout,
+      order,
+      payment,
+      evidenceId: parseId<"EvidenceId">("evi_discountfinal", "evi"),
+      evidence: { requestId: "req_discount_final" },
+      occurredAt: now,
+      discountReservationId: reservationId,
+    };
+    await expect(
+      store.commitCheckout({
+        ...commit,
+        connectionId: parseId<"ConnectionId">("conn_wrongfinal", "conn"),
+      }),
+    ).rejects.toThrow("Discounted checkout commit was not atomic");
+    await expect(store.getResource<Order>(tenantId, "order", order.id)).resolves.toBeUndefined();
+    await store.commitCheckout(commit);
+    await expect(store.commitCheckout(commit)).resolves.toBeUndefined();
+    await expect(store.getResource<Order>(tenantId, "order", order.id)).resolves.toEqual(order);
+    const row = await db
+      .prepare(
+        "SELECT status, order_id FROM polybill_discount_redemptions WHERE tenant_id = ? AND redemption_id = ?",
+      )
+      .bind(tenantId, reservationId)
+      .first<{ status: string; order_id: string }>();
+    expect(row).toEqual({ status: "finalized", order_id: order.id });
   });
 
   it("atomically redeems a single-use voucher once under contention", async () => {
@@ -540,6 +672,9 @@ function fixtureOrder(id: Order["id"], price: Price): Order {
         subtotal: money("2500", "USD"),
       },
     ],
+    grossTotal: money("2500", "USD"),
+    discounts: [],
+    discountTotal: money("0", "USD"),
     total: money("2500", "USD"),
     paymentStatus: "pending",
     fulfillmentStatus: "unfulfilled",
