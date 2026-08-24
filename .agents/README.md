@@ -53,9 +53,14 @@ Billing 和 `x402-paysdk`。
 | [PROVIDER_CONTRACT.md](./PROVIDER_CONTRACT.md) | adapter SPI、能力协商、错误和幂等约定 |
 | [WEBHOOKS.md](./WEBHOOKS.md) | 统一入口、签名、inbox、事件归一化和对账 |
 | [MIGRATION.md](./MIGRATION.md) | 已有系统接入、provider 切换、双跑和回滚 |
+| [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) | 现有系统的非侵入接入步骤和 cutback 操作 |
 | [X402.md](./X402.md) | `x402-paysdk` 包装方式与链上最终性 |
 | [SECURITY.md](./SECURITY.md) | 威胁模型、密钥、PII、license 和 SSRF 防护 |
 | [TESTING.md](./TESTING.md) | 不依赖真实 webhook 的完整测试策略 |
+| [PUBLIC_API.md](./PUBLIC_API.md) | facade、package 边界和公开成熟度说明 |
+| [COMPATIBILITY.md](./COMPATIBILITY.md) | provider 能力、证据等级和 stable promotion gate |
+| [OPERATIONS.md](./OPERATIONS.md) | webhook、队列、D1、密钥和迁移运维手册 |
+| [RELEASE.md](./RELEASE.md) | 发布门禁、changeset 和 provider drift 流程 |
 | [MILESTONES.md](./MILESTONES.md) | 里程碑、退出条件、风险和交付顺序 |
 
 ## 变更规则
