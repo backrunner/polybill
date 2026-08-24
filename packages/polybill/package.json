@@ -24,7 +24,8 @@
     "@polybill/application": "workspace:^",
     "@polybill/core": "workspace:^",
     "@polybill/licensing": "workspace:^",
-    "@polybill/migration": "workspace:^"
+    "@polybill/migration": "workspace:^",
+    "@polybill/webhooks": "workspace:^"
   },
   "devDependencies": {
     "@polybill/store-memory": "workspace:^",

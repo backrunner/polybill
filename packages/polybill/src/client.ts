@@ -39,6 +39,15 @@ import {
   type SecretCrypto,
 } from "@polybill/licensing";
 import { MigrationRunner, type MigrationStore, type MigrationTarget } from "@polybill/migration";
+import {
+  createWebhookConsumer,
+  createWebhookHandler,
+  providerSlug,
+  type InboxRecord,
+  type WebhookConnectionResolver,
+  type WebhookInboxStore,
+  type WebhookQueue,
+} from "@polybill/webhooks";
 import { noopLogger, SecureIdGenerator, systemClock } from "./runtime.js";
 
 export interface PolybillOptions {
@@ -61,6 +70,14 @@ export interface PolybillOptions {
   readonly migration?: {
     readonly store: MigrationStore;
     readonly target: MigrationTarget;
+  };
+  readonly webhooks?: {
+    readonly resolver: WebhookConnectionResolver;
+    readonly inbox: WebhookInboxStore;
+    readonly queue: WebhookQueue;
+    readonly adapters?: ReadonlyMap<string, ProviderAdapter>;
+    readonly maxBodyBytes?: number;
+    readonly now?: () => string;
   };
 }
 
@@ -88,6 +105,10 @@ export interface PolybillClient {
   readonly licenses: LicenseService | undefined;
   readonly vouchers: VoucherService | undefined;
   readonly migrations: MigrationRunner | undefined;
+  readonly webhooks: {
+    readonly handler: ((request: Request) => Promise<Response>) | undefined;
+    readonly consume: ((record: InboxRecord) => Promise<void>) | undefined;
+  };
   getCapabilities(): Promise<CapabilitySnapshot>;
 }
 
@@ -151,6 +172,31 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
           clock,
         });
 
+  const webhookAdapters =
+    options.webhooks?.adapters ??
+    new Map([[providerSlug(options.connection.provider), options.adapter]]);
+  const webhookHandler =
+    options.webhooks === undefined
+      ? undefined
+      : createWebhookHandler({
+          adapters: webhookAdapters,
+          inbox: options.webhooks.inbox,
+          queue: options.webhooks.queue,
+          resolver: options.webhooks.resolver,
+          ...(options.webhooks.maxBodyBytes === undefined
+            ? {}
+            : { maxBodyBytes: options.webhooks.maxBodyBytes }),
+          ...(options.webhooks.now === undefined ? {} : { now: options.webhooks.now }),
+        });
+  const webhookConsumer =
+    options.webhooks === undefined
+      ? undefined
+      : createWebhookConsumer({
+          adapters: webhookAdapters,
+          inbox: options.webhooks.inbox,
+          mappingStore: options.store,
+        });
+
   return {
     catalog: new CatalogService(resources),
     catalogSync: new CatalogSyncService(resources),
@@ -168,6 +214,7 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
     vouchers,
     migrations:
       options.migration === undefined ? undefined : new MigrationRunner(options.migration),
+    webhooks: { handler: webhookHandler, consume: webhookConsumer },
     async getCapabilities() {
       const context = await providerContext(shared, undefined);
       return options.adapter.getCapabilities(context);

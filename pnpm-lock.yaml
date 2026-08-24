@@ -202,6 +202,9 @@ importers:
       '@polybill/migration':
         specifier: workspace:^
         version: link:../migration
+      '@polybill/webhooks':
+        specifier: workspace:^
+        version: link:../webhooks
     devDependencies:
       '@polybill/store-memory':
         specifier: workspace:^

@@ -1,6 +1,7 @@
 import { createPolybill, createWebSecretCrypto } from "../src/index.js";
 import { money, parseId, parseIdempotencyKey, parseIsoDateTime, type Price } from "@polybill/core";
 import { createMemoryLicensingStore, createMemoryStore } from "@polybill/store-memory";
+import { MemoryWebhookInbox } from "@polybill/webhooks";
 import {
   createFakeProvider,
   createWebCryptoPort,
@@ -53,6 +54,31 @@ describe("polybill facade", () => {
 
     expect(capabilities.provider).toBe("fake");
     expect(result.order.total).toEqual(money("1200", "USD"));
+  });
+
+  it("composes the unified webhook handler and consumer when configured", () => {
+    const inbox = new MemoryWebhookInbox();
+    const client = createPolybill({
+      tenantId,
+      connection,
+      credentials: { apiKey: "test" },
+      adapter: createFakeProvider(),
+      store: createMemoryStore(),
+      webhooks: {
+        inbox,
+        queue: inbox,
+        resolver: {
+          resolve: async () => ({
+            tenantId,
+            connection,
+            secret: { active: "fixture", activeKeyId: "fixture-key" },
+          }),
+        },
+      },
+    });
+
+    expect(client.webhooks.handler).toBeTypeOf("function");
+    expect(client.webhooks.consume).toBeTypeOf("function");
   });
 
   it("manages canonical resources without exposing provider IDs", async () => {
