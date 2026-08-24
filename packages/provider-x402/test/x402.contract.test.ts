@@ -28,6 +28,18 @@ const connection: ConnectionRef = {
 };
 
 describe("x402 adapter contract", () => {
+  it("does not expose a reusable or implicit recurring subscription command", async () => {
+    const capabilities = await createX402Adapter(options(createNonceStore())).getCapabilities(
+      context(globalThis.fetch),
+    );
+    expect(capabilities.capabilities["subscription.create"]).toMatchObject({
+      support: "unsupported",
+    });
+    expect(capabilities.capabilities["subscription.mandate"]).toMatchObject({
+      support: "unsupported",
+    });
+  });
+
   it("creates a fixed USDC payment ref from canonical minor units", async () => {
     const scripted = createScriptedFetch([
       {

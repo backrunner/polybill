@@ -7,14 +7,6 @@ import {
 import { parseId } from "@polybill/core";
 
 export function x402Capabilities(context: ProviderContext): CapabilitySnapshot {
-  const recurring = {
-    support: "emulated",
-    fidelity: "workflow",
-    strategy: "customer_reauthorization_each_cycle",
-    environments: ["test", "live"],
-    constraints: { reusableMandate: false },
-    migration: "reauthorize",
-  } as const;
   return {
     provider: "x402",
     adapterVersion: "0.1.0",
@@ -31,7 +23,10 @@ export function x402Capabilities(context: ProviderContext): CapabilitySnapshot {
       },
       "payment.one_time": nativeCapability(),
       "payment.asset_settlement": nativeCapability(),
-      "subscription.create": recurring,
+      "subscription.create": unsupportedCapability(
+        "The x402 adapter creates one-time PaymentRefs only; schedule a new customer-authorized PaymentRef for each cycle",
+        ["customer_reauthorization_each_cycle"],
+      ),
       "subscription.mandate": unsupportedCapability(
         "x402 v1 does not provide a reusable recurring payment mandate",
         ["customer_reauthorization_each_cycle"],
