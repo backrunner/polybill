@@ -62,6 +62,16 @@ importers:
 
   packages/core: {}
 
+  packages/licensing:
+    dependencies:
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
+
   packages/polybill:
     dependencies:
       '@polybill/adapter-kit':
@@ -81,6 +91,15 @@ importers:
         specifier: workspace:^
         version: link:../testing
 
+  packages/store-d1:
+    dependencies:
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+      '@polybill/webhooks':
+        specifier: workspace:^
+        version: link:../webhooks
+
   packages/store-memory:
     dependencies:
       '@polybill/application':
@@ -89,6 +108,13 @@ importers:
       '@polybill/core':
         specifier: workspace:^
         version: link:../core
+      '@polybill/licensing':
+        specifier: workspace:^
+        version: link:../licensing
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
 
   packages/testing:
     dependencies:
@@ -104,6 +130,19 @@ importers:
       '@polybill/store-memory':
         specifier: workspace:^
         version: link:../store-memory
+
+  packages/webhooks:
+    dependencies:
+      '@polybill/adapter-kit':
+        specifier: workspace:^
+        version: link:../adapter-kit
+      '@polybill/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
 
 packages:
 

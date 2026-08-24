@@ -19,7 +19,10 @@ export type SettlementQuoteId = Brand<string, "SettlementQuoteId">;
 export type EntitlementPolicyId = Brand<string, "EntitlementPolicyId">;
 export type EntitlementGrantId = Brand<string, "EntitlementGrantId">;
 export type LicenseId = Brand<string, "LicenseId">;
+export type LicenseInstanceId = Brand<string, "LicenseInstanceId">;
+export type VoucherBatchId = Brand<string, "VoucherBatchId">;
 export type VoucherId = Brand<string, "VoucherId">;
+export type RedemptionId = Brand<string, "RedemptionId">;
 
 const ID_PATTERN = /^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9][A-Za-z0-9_-]{5,127}$/;
 const IDEMPOTENCY_PATTERN = /^[\x21-\x7e]{8,255}$/;

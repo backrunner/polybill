@@ -1,0 +1,28 @@
+{
+  "name": "@polybill/licensing",
+  "version": "0.1.0",
+  "description": "Portable entitlement, license, and voucher domain for Polybill",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "workerd": "./dist/index.js",
+      "worker": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@polybill/core": "workspace:^"
+  },
+  "devDependencies": {
+    "vitest": "4.1.11"
+  }
+}

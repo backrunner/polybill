@@ -21,6 +21,10 @@
   },
   "dependencies": {
     "@polybill/application": "workspace:^",
-    "@polybill/core": "workspace:^"
+    "@polybill/core": "workspace:^",
+    "@polybill/licensing": "workspace:^"
+  },
+  "devDependencies": {
+    "vitest": "4.1.11"
   }
 }
