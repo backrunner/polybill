@@ -7,11 +7,18 @@ import {
   type TenantId,
 } from "@polybill/core";
 import { generateSecret, normalizeSecret } from "./keys.js";
-import type { VoucherBatch, VoucherBenefit, VoucherRecord, VoucherRedemption } from "./domain.js";
-import type { LicensingIds, SecretCrypto, VoucherStore } from "./ports.js";
+import type {
+  EntitlementGrant,
+  VoucherBatch,
+  VoucherBenefit,
+  VoucherRecord,
+  VoucherRedemption,
+} from "./domain.js";
+import { EntitlementService } from "./entitlement-service.js";
+import type { EntitlementStore, LicensingIds, SecretCrypto, VoucherStore } from "./ports.js";
 
 export interface VoucherServiceOptions {
-  readonly store: VoucherStore;
+  readonly store: VoucherStore & EntitlementStore;
   readonly crypto: SecretCrypto;
   readonly ids: LicensingIds;
   readonly clock: Clock;
@@ -28,8 +35,10 @@ export interface CreateVoucherBatchCommand {
 
 export class VoucherService {
   readonly #options: VoucherServiceOptions;
+  readonly #entitlements: EntitlementService;
   constructor(options: VoucherServiceOptions) {
     this.#options = options;
+    this.#entitlements = new EntitlementService(options);
   }
 
   async createBatch(command: CreateVoucherBatchCommand): Promise<{
@@ -39,6 +48,18 @@ export class VoucherService {
   }> {
     integer(command.quantity, "quantity", 100_000);
     integer(command.maxUses, "max uses", 1_000_000);
+    if (
+      command.benefit.kind === "entitlement" &&
+      (await this.#options.store.getEntitlementPolicy(
+        command.tenantId,
+        command.benefit.policyId,
+      )) === undefined
+    )
+      throw new PolybillError("Entitlement policy was not found", {
+        code: "not_found",
+        operation: "voucher.create_batch",
+        retryable: false,
+      });
     const prefix = command.prefix.toUpperCase();
     if (!/^[A-Z][A-Z0-9]{1,7}$/.test(prefix))
       throw invalid("Voucher prefix must be 2-8 uppercase characters", "voucher.create_batch");
@@ -116,6 +137,19 @@ export class VoucherService {
     readonly beneficiaryRef: string;
     readonly value?: Money;
   }): Promise<VoucherRedemption> {
+    return (await this.redeemWithBenefit(input)).redemption;
+  }
+
+  async redeemWithBenefit(input: {
+    readonly tenantId: TenantId;
+    readonly code: string;
+    readonly idempotencyKey: string;
+    readonly beneficiaryRef: string;
+    readonly value?: Money;
+  }): Promise<{
+    readonly redemption: VoucherRedemption;
+    readonly entitlementGrant?: EntitlementGrant;
+  }> {
     if (input.idempotencyKey.length < 8 || input.idempotencyKey.length > 255)
       throw invalid("Invalid idempotency key", "voucher.redeem");
     const prefix = input.code.split("-")[0]?.toUpperCase();
@@ -135,7 +169,28 @@ export class VoucherService {
       redemption,
       now: this.#options.clock.now(),
     });
-    if (result.kind === "redeemed" || result.kind === "replay") return result.redemption;
+    if (result.kind === "redeemed" || result.kind === "replay") {
+      const batch = await this.#options.store.getVoucherBatch(
+        input.tenantId,
+        result.voucher.batchId,
+      );
+      if (batch === undefined)
+        throw new PolybillError("Voucher batch is missing", {
+          code: "conflict",
+          operation: "voucher.deliver_benefit",
+          retryable: true,
+        });
+      if (batch.benefit.kind === "credit") return { redemption: result.redemption };
+      const entitlementGrant = await this.#entitlements.grant({
+        tenantId: input.tenantId,
+        idempotencyKey: `voucher:${result.redemption.id}`,
+        policyId: batch.benefit.policyId,
+        beneficiaryRef: input.beneficiaryRef,
+        source: "voucher",
+        sourceRef: result.redemption.id,
+      });
+      return { redemption: result.redemption, entitlementGrant };
+    }
     throw new PolybillError(`Voucher redemption failed: ${result.kind}`, {
       code:
         result.kind === "not_found"

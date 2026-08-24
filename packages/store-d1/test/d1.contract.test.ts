@@ -86,6 +86,7 @@ describe("D1 control-plane contract", () => {
       )
       .run();
     await binding.exec(await migration("0005_entitlements.sql"));
+    await binding.exec(await migration("0006_entitlement_beneficiaries.sql"));
   });
 
   afterEach(async () => {
@@ -99,6 +100,7 @@ describe("D1 control-plane contract", () => {
     );
     expect(grant).toMatchObject({
       policyId: "epol_legacy01",
+      beneficiaryRef: "legacy:unassigned",
       status: "active",
       updatedAt: now,
     });
@@ -225,6 +227,7 @@ describe("D1 control-plane contract", () => {
       tenantId,
       idempotencyKey: "d1-grant-license",
       policyId: policy.id,
+      beneficiaryRef: "customer-d1-license",
       source: "manual",
       sourceRef: "d1-license",
     });
@@ -272,6 +275,7 @@ describe("D1 control-plane contract", () => {
       tenantId,
       idempotencyKey: "d1-grant-create-a",
       policyId: policyA.id,
+      beneficiaryRef: "customer-shared",
       source: "order",
       sourceRef: "shared-order",
     });
@@ -280,6 +284,7 @@ describe("D1 control-plane contract", () => {
         tenantId,
         idempotencyKey: "d1-grant-create-b",
         policyId: policyB.id,
+        beneficiaryRef: "customer-shared",
         source: "order",
         sourceRef: "shared-order",
       }),
@@ -296,11 +301,20 @@ describe("D1 control-plane contract", () => {
 
   it("atomically redeems a single-use voucher once under contention", async () => {
     const store = new D1LicensingStore(db);
-    const service = new VoucherService({
+    const common = {
       store,
       crypto: secretCrypto(),
       ids: new DeterministicIds(),
       clock: new VirtualClock(now),
+    };
+    const entitlements = new EntitlementService(common);
+    const service = new VoucherService(common);
+    const policy = await entitlements.createPolicy({
+      tenantId,
+      idempotencyKey: "d1-policy-voucher",
+      benefit: "app:voucher-access",
+      revokeOn: "never",
+      gracePeriodSeconds: 0,
     });
     const created = await service.createBatch({
       tenantId,
@@ -310,7 +324,7 @@ describe("D1 control-plane contract", () => {
       maxUses: 1,
       benefit: {
         kind: "entitlement",
-        policyId: parseId<"EntitlementPolicyId">("epol_d1voucher", "epol"),
+        policyId: policy.id,
       },
     });
     const code = created.codes[0];
@@ -326,6 +340,22 @@ describe("D1 control-plane contract", () => {
       ),
     );
     expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+    const successful = attempts.find((item) => item.status === "fulfilled");
+    if (successful?.status !== "fulfilled") throw new Error("Expected successful redemption");
+    await expect(
+      service.redeemWithBenefit({
+        tenantId,
+        code,
+        idempotencyKey: successful.value.idempotencyKey,
+        beneficiaryRef: successful.value.beneficiaryRef,
+      }),
+    ).resolves.toMatchObject({
+      entitlementGrant: {
+        policyId: policy.id,
+        beneficiaryRef: successful.value.beneficiaryRef,
+        sourceRef: successful.value.id,
+      },
+    });
   });
 
   it("leases migration items, resumes stale work, and keeps checkpoints monotonic", async () => {

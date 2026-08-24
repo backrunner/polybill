@@ -25,6 +25,7 @@ export function decodeEntitlementGrant(value: string): EntitlementGrant {
     "id",
     "tenantId",
     "policyId",
+    "beneficiaryRef",
     "source",
     "sourceRef",
     "status",

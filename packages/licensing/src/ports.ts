@@ -4,6 +4,7 @@ import type {
   IsoDateTime,
   LicenseId,
   TenantId,
+  VoucherBatchId,
 } from "@polybill/core";
 import type {
   EntitlementGrant,
@@ -116,6 +117,7 @@ export interface VoucherStore {
     issuanceKey: string,
     payloadHash: string,
   ): Promise<CreateVoucherBatchResult>;
+  getVoucherBatch(tenantId: TenantId, batchId: VoucherBatchId): Promise<VoucherBatch | undefined>;
   redeemVoucher(input: {
     readonly tenantId: TenantId;
     readonly digest: string;

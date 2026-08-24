@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWebCryptoPort } from "@polybill/adapter-kit";
 import { parseId } from "@polybill/core";
-import { createWebSecretCrypto, VoucherService } from "@polybill/licensing";
+import { createWebSecretCrypto, EntitlementService, VoucherService } from "@polybill/licensing";
 import { D1LicensingStore, type D1DatabaseLike } from "@polybill/store-d1";
 import { build } from "esbuild";
 import { Miniflare } from "miniflare";
@@ -115,12 +115,20 @@ async function issueVoucher(db: D1DatabaseLike): Promise<string> {
     activeEncryptionKeyId: "worker-v1",
     encryptionKeys: { "worker-v1": encryptionKey },
   });
-  const service = new VoucherService({
+  const common = {
     store: new D1LicensingStore(db),
     crypto,
     ids: new SecureIdGenerator(createWebCryptoPort()),
     clock: systemClock,
+  };
+  const policy = await new EntitlementService(common).createPolicy({
+    tenantId,
+    idempotencyKey: "worker-voucher-policy",
+    benefit: "app:worker-access",
+    revokeOn: "never",
+    gracePeriodSeconds: 0,
   });
+  const service = new VoucherService(common);
   const issued = await service.createBatch({
     tenantId,
     issuanceKey: "worker-voucher-issuance",
@@ -129,7 +137,7 @@ async function issueVoucher(db: D1DatabaseLike): Promise<string> {
     maxUses: 1,
     benefit: {
       kind: "entitlement",
-      policyId: parseId<"EntitlementPolicyId">("epol_workerexample", "epol"),
+      policyId: policy.id,
     },
   });
   const code = issued.codes[0];
@@ -143,6 +151,8 @@ async function applyMigrations(db: D1DatabaseLike & { exec(query: string): Promi
     "0002_x402_nonce.sql",
     "0003_migration_leases.sql",
     "0004_reconciliation_checkpoints.sql",
+    "0005_entitlements.sql",
+    "0006_entitlement_beneficiaries.sql",
   ]) {
     const sql = await readFile(
       new URL(`../../../packages/store-d1/migrations/${name}`, import.meta.url),

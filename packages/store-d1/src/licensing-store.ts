@@ -1,4 +1,4 @@
-import type { LicenseId, TenantId } from "@polybill/core";
+import type { LicenseId, TenantId, VoucherBatchId } from "@polybill/core";
 import type {
   ActivateLicenseResult,
   CreateVoucherBatchResult,
@@ -11,7 +11,7 @@ import type {
   VoucherRecord,
   VoucherRedemption,
 } from "@polybill/licensing";
-import type { D1DatabaseLike, D1Result } from "./d1.js";
+import type { D1DatabaseLike } from "./d1.js";
 import {
   decodeLicense,
   decodeLicenseInstance,
@@ -21,6 +21,7 @@ import {
 } from "./licensing-codecs.js";
 import { consumeVoucher, validateVoucher } from "./voucher-logic.js";
 import { D1EntitlementStore } from "./entitlement-store.js";
+import { changes, type LicenseInstanceRow, type VoucherRow } from "./licensing-rows.js";
 
 export class D1LicensingStore extends D1EntitlementStore implements LicensingStore {
   readonly #db: D1DatabaseLike;
@@ -180,7 +181,7 @@ export class D1LicensingStore extends D1EntitlementStore implements LicensingSto
     payloadHash: string,
   ): Promise<CreateVoucherBatchResult> {
     const existing = await this.#voucherBatchByIssuance(batch.tenantId, issuanceKey);
-    if (existing !== null) return this.#voucherReplay(existing, payloadHash);
+    if (existing !== null) return this.#voucherReplay(batch.tenantId, existing, payloadHash);
     const statements = [
       this.#db
         .prepare(
@@ -213,8 +214,19 @@ export class D1LicensingStore extends D1EntitlementStore implements LicensingSto
     } catch (error) {
       const raced = await this.#voucherBatchByIssuance(batch.tenantId, issuanceKey);
       if (raced === null) throw error;
-      return this.#voucherReplay(raced, payloadHash);
+      return this.#voucherReplay(batch.tenantId, raced, payloadHash);
     }
+  }
+
+  async getVoucherBatch(
+    tenantId: TenantId,
+    batchId: VoucherBatchId,
+  ): Promise<VoucherBatch | undefined> {
+    const row = await this.#db
+      .prepare("SELECT value FROM polybill_voucher_batches WHERE tenant_id = ? AND batch_id = ?")
+      .bind(tenantId, batchId)
+      .first<{ value: string }>();
+    return row === null ? undefined : decodeVoucherBatch(row.value);
   }
 
   async redeemVoucher(
@@ -337,13 +349,16 @@ export class D1LicensingStore extends D1EntitlementStore implements LicensingSto
   }
 
   async #voucherReplay(
+    tenantId: TenantId,
     row: { batch_id: string; payload_hash: string; value: string },
     payloadHash: string,
   ): Promise<CreateVoucherBatchResult> {
     if (row.payload_hash !== payloadHash) return { kind: "conflict" };
     const result = await this.#db
-      .prepare("SELECT value FROM polybill_vouchers WHERE batch_id = ? ORDER BY voucher_id")
-      .bind(row.batch_id)
+      .prepare(
+        "SELECT value FROM polybill_vouchers WHERE tenant_id = ? AND batch_id = ? ORDER BY voucher_id",
+      )
+      .bind(tenantId, row.batch_id)
       .all<{ value: string }>();
     return {
       kind: "replay",
@@ -374,29 +389,4 @@ export class D1LicensingStore extends D1EntitlementStore implements LicensingSto
     if (voucher === null) throw new Error("D1 redemption voucher is missing");
     return { kind: "replay", redemption, voucher: decodeVoucher(voucher.value) };
   }
-}
-
-interface LicenseInstanceRow {
-  readonly instance_id: string;
-  readonly tenant_id: string;
-  readonly license_id: string;
-  readonly instance_ref: string;
-  readonly device_digest: string;
-  readonly activated_at: string;
-  readonly last_validated_at: string;
-  readonly deactivated_at: string | null;
-}
-
-interface VoucherRow {
-  readonly voucher_id: string;
-  readonly status: string;
-  readonly remaining_uses: number;
-  readonly remaining_amount: string | null;
-  readonly remaining_currency: string | null;
-  readonly expires_at: string | null;
-  readonly value: string;
-}
-
-function changes(result: D1Result | undefined): number {
-  return typeof result?.meta?.changes === "number" ? result.meta.changes : 0;
 }

@@ -1,4 +1,10 @@
-import { compareMoney, subtractMoney, type LicenseId, type TenantId } from "@polybill/core";
+import {
+  compareMoney,
+  subtractMoney,
+  type LicenseId,
+  type TenantId,
+  type VoucherBatchId,
+} from "@polybill/core";
 import type {
   ActivateLicenseResult,
   CreateVoucherBatchResult,
@@ -135,6 +141,14 @@ export class MemoryLicensingStore extends MemoryEntitlementStore implements Lice
       value: { batch: clone(batch), vouchers: clone(vouchers) },
     });
     return { kind: "created", batch: clone(batch), vouchers: clone(vouchers) };
+  }
+
+  async getVoucherBatch(
+    tenantId: TenantId,
+    batchId: VoucherBatchId,
+  ): Promise<VoucherBatch | undefined> {
+    const batch = this.#batches.get(`${tenantId}:${batchId}`);
+    return batch === undefined ? undefined : clone(batch);
   }
 
   async redeemVoucher(

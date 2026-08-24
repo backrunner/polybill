@@ -23,6 +23,7 @@ export interface EntitlementGrant {
   readonly id: EntitlementGrantId;
   readonly tenantId: TenantId;
   readonly policyId: EntitlementPolicyId;
+  readonly beneficiaryRef: string;
   readonly source: "order" | "subscription" | "manual" | "voucher" | "migration";
   readonly sourceRef: string;
   readonly status: "pending" | "active" | "suspended" | "revoked" | "expired";

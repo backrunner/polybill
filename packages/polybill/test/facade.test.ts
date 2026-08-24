@@ -218,6 +218,7 @@ describe("polybill facade", () => {
       tenantId,
       idempotencyKey: "facade-grant-0001",
       policyId: policy.id,
+      beneficiaryRef: customer.id,
       source: "order",
       sourceRef: checkout.order.id,
     });

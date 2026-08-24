@@ -29,6 +29,7 @@ export interface GrantEntitlementCommand {
   readonly tenantId: TenantId;
   readonly idempotencyKey: string;
   readonly policyId: EntitlementPolicyId;
+  readonly beneficiaryRef: string;
   readonly source: EntitlementGrant["source"];
   readonly sourceRef: string;
   readonly expiresAt?: IsoDateTime;
@@ -85,6 +86,7 @@ export class EntitlementService {
   async grant(command: GrantEntitlementCommand): Promise<EntitlementGrant> {
     idempotencyKey(command.idempotencyKey, "entitlement.grant.create");
     text(command.sourceRef, "source reference", "entitlement.grant.create");
+    text(command.beneficiaryRef, "beneficiary reference", "entitlement.grant.create");
     if (
       !(["order", "subscription", "manual", "voucher", "migration"] as const).includes(
         command.source,
@@ -100,6 +102,7 @@ export class EntitlementService {
     const payloadHash = await this.#options.crypto.hash(
       JSON.stringify([
         command.policyId,
+        command.beneficiaryRef,
         command.source,
         command.sourceRef,
         command.expiresAt ?? null,
@@ -110,6 +113,7 @@ export class EntitlementService {
       id: parseId<"EntitlementGrantId">(this.#options.ids.next("grant"), "grant"),
       tenantId: command.tenantId,
       policyId: command.policyId,
+      beneficiaryRef: command.beneficiaryRef,
       source: command.source,
       sourceRef: command.sourceRef,
       status: "active",

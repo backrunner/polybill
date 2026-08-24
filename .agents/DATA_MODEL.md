@@ -216,6 +216,9 @@ Policy 描述购买 SKU 后授予什么、何时撤销以及 grace period。Gran
 `pending | active | suspended | revoked | expired`。来源可以是 order、subscription、manual、
 voucher 或 migration。
 
+Grant 必须保存 opaque `beneficiaryRef`，它由宿主映射到用户、团队或组织；email 不能作为隐式
+beneficiary identity。历史记录无法可靠推断时迁移为显式 `legacy:unassigned`，并进入后续核对。
+
 Policy 创建和 Grant 创建都必须携带 tenant-scoped idempotency key。一个 source 可以按多个 policy
 产生独立 Grant，因此来源唯一键是 `(tenant, policy, source, sourceRef)`，不能只按 sourceRef 去重。
 同一 idempotency key 和 payload 重放返回原 Grant；同一 policy/source 使用另一 key 重复创建时返回
@@ -262,7 +265,9 @@ active -----------------> expired | revoked
 ```
 
 单次码的事务条件是 `status = active AND remaining_uses > 0`；成功扣减和创建 redemption 必须
-在一个事务/Durable Object turn 内完成。
+在一个事务/Durable Object turn 内完成。entitlement voucher 的 redemption ledger 是交付恢复点：
+兑换后以 redemption ID 作为 sourceRef 幂等创建 Grant；若进程在两步之间终止，相同兑换 key 的
+重试先重放 redemption，再补齐唯一 Grant。创建 entitlement voucher batch 前必须确认 policy 存在。
 
 ## 7. Provider mappings and evidence
 
