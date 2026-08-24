@@ -50,6 +50,7 @@ core <- adapter-kit
 core <- application <- polybill
 adapter-kit <- provider-*
 application <- webhooks
+webhooks <- polybill
 application <- migration
 application <- store-*
 provider-x402 -> x402-paysdk (public package entry only)
@@ -97,6 +98,9 @@ provider-x402 -> x402-paysdk (public package entry only)
 - raw body 上限、connection resolution、signature verification、inbox claim。
 - canonical event mapper 调度、dead-letter 和 replay API。
 - Hono/Next/Node adapter 作为 subpath export，核心 handler 保持 Web API。
+
+`polybill` facade 在显式注入 resolver、inbox 和 queue 后组合同一个 handler/consumer；存储和
+Cloudflare Queue 仍由宿主提供，不在 facade 内创建全局连接。
 
 ### `@polybill/licensing`
 
