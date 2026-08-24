@@ -8,6 +8,7 @@ import {
   importSourceItems,
   parseMigrationCli,
   planMigration,
+  providerRecordImportCodec,
   runMigrationCli,
   type MigrationPlan,
   type MigrationPlanItem,
@@ -185,14 +186,7 @@ describe("migration toolkit", () => {
             ? { items: [{ id: "prod_1" }], nextCursor: "page-2" }
             : { items: [{ id: "prod_2" }] },
       },
-      codec: {
-        decode: (entityType, value) => ({
-          key: `${entityType}:${String(value.id)}`,
-          entityType,
-          sourceId: String(value.id),
-          payload: value,
-        }),
-      },
+      codec: providerRecordImportCodec,
       entityTypes: ["product"],
       onCheckpoint: async (checkpoint) => {
         checkpoints.push(checkpoint);

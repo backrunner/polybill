@@ -13,6 +13,7 @@ import type {
 } from "@polybill/core";
 import type { CapabilitySnapshot } from "./capabilities.js";
 import type { ProviderContext } from "./context.js";
+import type { ProviderMigrationSource } from "./migration.js";
 import type {
   CatalogProvider,
   CustomerProvider,
@@ -170,6 +171,7 @@ export interface ProviderAdapter {
   readonly checkout?: CheckoutProvider;
   readonly subscriptions?: SubscriptionProvider;
   readonly refunds?: RefundProvider;
+  readonly migration?: ProviderMigrationSource;
   readonly webhooks: WebhookProvider;
   readonly reconcile: ReconcileProvider;
 }

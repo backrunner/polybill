@@ -202,6 +202,10 @@ codemod/migration helper 把常见调用转换为 canonical command，并输出�
 - provider 不支持按更新时间 list 时，分片 full scan 并保存 page cursor。
 - importer 只构建 projection/mapping，不重发 `payment.succeeded` 给宿主，除非显式选择
   `emitHistoricalEvents`，且历史事件 namespace 与实时事件分开。
+- provider adapter 的可选只读 migration port 提供 source scanner；migration toolkit 绑定显式
+  tenant/connection/environment context，并在每页保存 checkpoint。cursor 只作为 provider-specific
+  opaque state 返回，adapter 必须以固定 base URL 重建下一页请求，不能跟随 provider payload 中的
+  任意 URL。
 
 ## 10. Migration verification report
 

@@ -17,10 +17,17 @@ interface ProviderAdapter {
   readonly discounts?: DiscountProvider;
   readonly licensing?: NativeLicensingProvider;
   readonly usage?: UsageProvider;
+  readonly migration?: ProviderMigrationSource;
   readonly webhooks: WebhookProvider;
   readonly reconcile: ReconcileProvider;
 }
 ```
+
+`ProviderMigrationSource` 是只读 source port。它接收正常的 `ProviderContext`，只返回经过边界
+校验的 provider record 和 opaque cursor；不得产生 create/update/archive，也不得直接跟随响应中的
+任意 next URL。adapter 需要把 provider cursor 解码并重新用固定 API base URL 与结构化 query 发起
+下一页请求。`@polybill/migration` 负责绑定 context、checkpoint、page/item limit 和 codec，不让
+provider 包反向依赖 migration 包。
 
 资源 port 的存在不等于所有操作都可用；具体 operation 仍由 capability snapshot 决定。
 

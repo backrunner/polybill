@@ -3,6 +3,7 @@ export * from "./canonical-events.js";
 export * from "./codecs.js";
 export * from "./context.js";
 export * from "./http.js";
+export * from "./migration.js";
 export * from "./ports.js";
 export * from "./resource-ports.js";
 export * from "./rsa.js";

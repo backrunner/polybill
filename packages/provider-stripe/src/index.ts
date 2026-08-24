@@ -4,6 +4,7 @@ import { stripeCatalog } from "./catalog.js";
 import { stripeCheckout } from "./checkout.js";
 import { stripeCustomers } from "./customers.js";
 import { stripeRefunds } from "./refunds.js";
+import { stripeMigration } from "./migration.js";
 import { stripeSubscriptions } from "./subscriptions.js";
 import { stripeWebhooks } from "./webhooks.js";
 
@@ -21,6 +22,7 @@ export function createStripeAdapter(): ProviderAdapter {
     checkout: stripeCheckout,
     subscriptions: stripeSubscriptions,
     refunds: stripeRefunds,
+    migration: stripeMigration,
     webhooks: stripeWebhooks,
     reconcile: {
       async checkout(context, externalId) {

@@ -58,6 +58,8 @@ provider-x402 -> x402-paysdk (public package entry only)
 - `core` 无 I/O、无 provider、无 store、无框架依赖。
 - `application` 只依赖 port interface，不 import 具体 adapter。
 - `provider-*` 不能互相依赖，也不能 import store implementation。
+- provider migration scanner contract 位于 `adapter-kit`；`migration` 绑定 context 与 checkpoint，
+  provider 包不得反向 import `migration`。
 - `store-*` 不能 import provider adapter。
 - `polybill` 是 composition root，不包含领域逻辑。
 - framework helpers 只能包装 Web `Request`/`Response` handler。

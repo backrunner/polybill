@@ -1,5 +1,10 @@
 import type { CanonicalBillingEvent, CustomerId } from "@polybill/core";
 import type {
+  ProviderImportPage,
+  ProviderMigrationSource,
+  ProviderContext,
+} from "@polybill/adapter-kit";
+import type {
   AdoptionMode,
   MigrationEntityType,
   MigrationItemResult,
@@ -8,13 +13,19 @@ import type {
   MigrationVerification,
 } from "./types.js";
 
-export interface MigrationPage {
-  readonly items: readonly Readonly<Record<string, unknown>>[];
-  readonly nextCursor?: string;
-}
+export type MigrationPage = ProviderImportPage;
 
 export interface ProviderSourceScanner {
   scan(entityType: MigrationEntityType, cursor?: string): Promise<MigrationPage>;
+}
+
+export function bindProviderSourceScanner(
+  source: ProviderMigrationSource,
+  context: ProviderContext,
+): ProviderSourceScanner {
+  return {
+    scan: (entityType, cursor) => source.scan(context, entityType, cursor),
+  };
 }
 
 export interface MigrationTarget {

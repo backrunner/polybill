@@ -8,6 +8,20 @@ export interface MigrationImportCodec {
   ): MigrationSourceItem;
 }
 
+export const providerRecordImportCodec: MigrationImportCodec = {
+  decode(entityType, value) {
+    const id = value.id;
+    if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$/.test(id))
+      throw new TypeError("Provider migration record has an invalid ID");
+    return {
+      key: `${entityType}:${id}`,
+      entityType,
+      sourceId: id,
+      payload: value,
+    };
+  },
+};
+
 export interface ImportSourceOptions {
   readonly scanner: ProviderSourceScanner;
   readonly codec: MigrationImportCodec;
