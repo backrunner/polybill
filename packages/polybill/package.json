@@ -23,7 +23,8 @@
     "@polybill/adapter-kit": "workspace:^",
     "@polybill/application": "workspace:^",
     "@polybill/core": "workspace:^",
-    "@polybill/licensing": "workspace:^"
+    "@polybill/licensing": "workspace:^",
+    "@polybill/migration": "workspace:^"
   },
   "devDependencies": {
     "@polybill/store-memory": "workspace:^",

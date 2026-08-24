@@ -11,12 +11,14 @@ import {
   type Price,
 } from "@polybill/core";
 import { createWebSecretCrypto, LicenseService, VoucherService } from "@polybill/licensing";
+import { planMigration } from "@polybill/migration";
 import { DeterministicIds, VirtualClock } from "@polybill/testing";
 import { Miniflare } from "miniflare";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   D1ApplicationStore,
   D1LicensingStore,
+  D1MigrationStore,
   D1X402NonceStore,
   D1X402TransactionStore,
   type D1DatabaseLike,
@@ -40,6 +42,7 @@ describe("D1 control-plane contract", () => {
     db = binding;
     await binding.exec(await migration("0001_control_plane.sql"));
     await binding.exec(await migration("0002_x402_nonce.sql"));
+    await binding.exec(await migration("0003_migration_leases.sql"));
   });
 
   afterEach(async () => {
@@ -203,6 +206,69 @@ describe("D1 control-plane contract", () => {
       ),
     );
     expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+  });
+
+  it("leases migration items, resumes stale work, and keeps checkpoints monotonic", async () => {
+    let time = 100;
+    let lease = 0;
+    const store = new D1MigrationStore(db, tenantId, {
+      now: () => time,
+      leaseMs: 10,
+      leaseToken: () => `migration-lease-${++lease}`,
+    });
+    const capabilities = {
+      provider: "stripe" as const,
+      adapterVersion: "0.1.0",
+      providerApiVersion: "fixture-v1",
+      capabilities: {},
+      commercialTerms: {
+        model: "payment_processor" as const,
+        sellerOfRecord: "merchant" as const,
+        taxCalculation: "merchant" as const,
+        taxInvoiceIssuer: "merchant" as const,
+        disputeResponsibility: "merchant" as const,
+        observedAt: now,
+        evidenceRef: parseId<"EvidenceId">("evi_migration", "evi"),
+      },
+      observedAt: now,
+    };
+    const plan = await planMigration({
+      id: "migration-d1",
+      tenantId,
+      sourceConnectionId: connectionId,
+      targetConnectionId: parseId<"ConnectionId">("conn_target", "conn"),
+      mode: "observe_only",
+      sourceCapabilities: capabilities,
+      targetCapabilities: capabilities,
+      items: [{ key: "payment", entityType: "payment", sourceId: "pay_source", payload: {} }],
+      createdAt: now,
+    });
+    await store.savePlan(plan);
+    await expect(store.getPlan(plan.id)).resolves.toEqual(plan);
+
+    const first = await store.claimItem(plan.id, "payment");
+    expect(first).toEqual({ kind: "claimed", leaseToken: "migration-lease-1" });
+    await expect(store.claimItem(plan.id, "payment")).resolves.toEqual({ kind: "in_progress" });
+    time = 111;
+    const resumed = await store.claimItem(plan.id, "payment");
+    expect(resumed).toEqual({ kind: "claimed", leaseToken: "migration-lease-3" });
+    if (resumed.kind !== "claimed") throw new Error("Expected the stale lease to be reclaimed");
+    await store.completeItem(plan.id, resumed.leaseToken, {
+      itemKey: "payment",
+      status: "mapped",
+    });
+    await expect(store.listResults(plan.id)).resolves.toEqual([
+      { itemKey: "payment", status: "mapped" },
+    ]);
+
+    await store.saveCheckpoint(plan.id, "payments", "later", 2);
+    await store.saveCheckpoint(plan.id, "payments", "earlier", 1);
+    await expect(store.getCheckpoint(plan.id, "payments")).resolves.toEqual({
+      cursor: "later",
+      sequence: 2,
+    });
+    await store.setRouting("shadow_read", plan.id);
+    await expect(store.getRouting()).resolves.toEqual({ mode: "shadow_read", planId: plan.id });
   });
 });
 

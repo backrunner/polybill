@@ -33,6 +33,7 @@ import {
   type LicensingStore,
   type SecretCrypto,
 } from "@polybill/licensing";
+import { MigrationRunner, type MigrationStore, type MigrationTarget } from "@polybill/migration";
 import { noopLogger, SecureIdGenerator, systemClock } from "./runtime.js";
 
 export interface PolybillOptions {
@@ -51,6 +52,10 @@ export interface PolybillOptions {
   readonly licensing?: {
     readonly store: LicensingStore;
     readonly crypto: SecretCrypto;
+  };
+  readonly migration?: {
+    readonly store: MigrationStore;
+    readonly target: MigrationTarget;
   };
 }
 
@@ -72,6 +77,7 @@ export interface PolybillClient {
   readonly subscriptions: SubscriptionService;
   readonly licenses: LicenseService | undefined;
   readonly vouchers: VoucherService | undefined;
+  readonly migrations: MigrationRunner | undefined;
   getCapabilities(): Promise<CapabilitySnapshot>;
 }
 
@@ -129,6 +135,8 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
     subscriptions: new SubscriptionService(resources),
     licenses,
     vouchers,
+    migrations:
+      options.migration === undefined ? undefined : new MigrationRunner(options.migration),
     async getCapabilities() {
       const context = await providerContext(shared, undefined);
       return options.adapter.getCapabilities(context);
