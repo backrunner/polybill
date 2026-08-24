@@ -2,6 +2,9 @@ packages:
   - "packages/*"
   - "apps/*"
 
+allowBuilds:
+  workerd: set this to true or false
+
 minimumReleaseAgeExclude:
   - "@typescript-eslint/eslint-plugin@8.68.0"
   - "@typescript-eslint/parser@8.68.0"
@@ -14,4 +17,5 @@ minimumReleaseAgeExclude:
   - "@typescript-eslint/utils@8.68.0"
   - "@typescript-eslint/visitor-keys@8.68.0"
 
-onlyBuiltDependencies: []
+onlyBuiltDependencies:
+  - workerd

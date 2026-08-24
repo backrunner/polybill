@@ -21,7 +21,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@polybill/application": "workspace:^",
     "@polybill/core": "workspace:^",
+    "@polybill/licensing": "workspace:^",
     "@polybill/webhooks": "workspace:^"
+  },
+  "devDependencies": {
+    "@polybill/testing": "workspace:^",
+    "miniflare": "3.20250718.3",
+    "vitest": "4.1.11"
   }
 }

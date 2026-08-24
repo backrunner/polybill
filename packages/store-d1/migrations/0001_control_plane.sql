@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS polybill_connections (
   tenant_id TEXT NOT NULL,
   connection_id TEXT NOT NULL,
@@ -148,5 +146,3 @@ CREATE TABLE IF NOT EXISTS polybill_audit (
   evidence TEXT NOT NULL,
   occurred_at TEXT NOT NULL
 );
-
-PRAGMA user_version = 1;

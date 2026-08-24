@@ -37,5 +37,9 @@ export default [
     files: ["scripts/**/*.mjs", "eslint.config.mjs"],
     rules: { "no-restricted-imports": "off", "no-undef": "off" },
   },
+  {
+    files: ["**/test/**/*.ts", "**/*.test.ts"],
+    rules: { "no-restricted-imports": "off" },
+  },
   prettier,
 ];
