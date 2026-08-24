@@ -89,11 +89,12 @@ type PriceModel =
   | { kind: "seat"; unit: Money; interval: BillingInterval }
   | { kind: "metered"; meterId: MeterId; interval: BillingInterval; tiers: readonly Tier[] }
   | { kind: "custom"; minimum?: Money; suggested?: Money }
-  | { kind: "free" };
+  | { kind: "free"; currency: Currency };
 ```
 
 localized override、tax behavior、trial policy 是显式字段。不能把 tax-inclusive 与
-tax-exclusive 价格视为同一版本。
+tax-exclusive 价格视为同一版本。免费价格仍必须声明币种，使全免费订单、税务上下文和目标
+provider catalog mapping 不依赖隐式 USD 默认值。
 
 ## 3. Customer and identity
 

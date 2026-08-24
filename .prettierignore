@@ -1,0 +1,6 @@
+.agents
+dist
+node_modules
+pnpm-lock.yaml
+coverage
+.wrangler

@@ -1,0 +1,39 @@
+{
+  "name": "polybill-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 --if-present run build",
+    "check:packages": "pnpm build && pnpm -r exec publint",
+    "check:worker-bundle": "pnpm build && node scripts/check-worker-bundle.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:contract": "vitest run --project contract",
+    "test:migration": "vitest run --project migration --passWithNoTests",
+    "test:security": "vitest run --project security --passWithNoTests",
+    "test:unit": "vitest run --project unit",
+    "test:workerd": "vitest run --project workerd --passWithNoTests",
+    "typecheck": "pnpm build && pnpm -r --workspace-concurrency=1 --if-present run typecheck"
+  },
+  "devDependencies": {
+    "@changesets/cli": "3.0.1",
+    "@eslint/js": "9.39.5",
+    "@types/node": "24.10.13",
+    "@typescript-eslint/eslint-plugin": "8.68.0",
+    "@typescript-eslint/parser": "8.68.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "fast-check": "4.9.0",
+    "prettier": "3.9.6",
+    "publint": "0.3.24",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

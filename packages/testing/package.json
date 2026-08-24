@@ -1,0 +1,28 @@
+{
+  "name": "@polybill/testing",
+  "version": "0.1.0",
+  "description": "Deterministic fake providers and test utilities for Polybill",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "workerd": "./dist/index.js",
+      "worker": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@polybill/adapter-kit": "workspace:^",
+    "@polybill/application": "workspace:^",
+    "@polybill/core": "workspace:^",
+    "@polybill/store-memory": "workspace:^"
+  }
+}
