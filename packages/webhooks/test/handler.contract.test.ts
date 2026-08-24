@@ -172,4 +172,35 @@ describe("unified webhook contract", () => {
     expect((await handler(request("12345"))).status).toBe(413);
     expect(observed).toHaveLength(0);
   });
+
+  it("keeps identical delivery keys isolated by tenant and environment", async () => {
+    const inbox = new MemoryWebhookInbox();
+    const observed: Uint8Array[] = [];
+    const adapters = new Map([["stripe", adapter(observed)]]);
+    const handler = createWebhookHandler({
+      adapters,
+      inbox,
+      queue: inbox,
+      resolver: {
+        resolve: async ({ headers }) => ({
+          tenantId:
+            headers.get("x-tenant") === "other"
+              ? parseId<"TenantId">("ten_webhook02", "ten")
+              : tenantId,
+          connection: {
+            ...connection,
+            environment: headers.get("x-env") === "live" ? "live" : "test",
+          },
+          secret: { active: "fixture-secret", activeKeyId: "key-1" },
+        }),
+      },
+    });
+    const first = request('{"type":"payment.succeeded"}', "same-delivery");
+    const second = request('{"type":"payment.succeeded"}', "same-delivery");
+    second.headers.set("x-tenant", "other");
+    second.headers.set("x-env", "live");
+    await expect(handler(first)).resolves.toHaveProperty("status", 202);
+    await expect(handler(second)).resolves.toHaveProperty("status", 202);
+    expect(inbox.queued).toHaveLength(2);
+  });
 });

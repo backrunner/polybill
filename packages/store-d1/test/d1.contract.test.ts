@@ -25,6 +25,7 @@ import {
   D1DiscountStore,
   D1LicensingStore,
   D1MigrationStore,
+  D1WebhookInbox,
   D1X402NonceStore,
   D1X402TransactionStore,
   type D1DatabaseLike,
@@ -90,6 +91,7 @@ describe("D1 control-plane contract", () => {
     await binding.exec(await migration("0006_entitlement_beneficiaries.sql"));
     await binding.exec(await migration("0007_discounts.sql"));
     await binding.exec(await migration("0008_discount_redemptions.sql"));
+    await binding.exec(await migration("0009_inbox_scope.sql"));
   });
 
   afterEach(async () => {
@@ -107,6 +109,80 @@ describe("D1 control-plane contract", () => {
       status: "active",
       updatedAt: now,
     });
+  });
+
+  it("upgrades the legacy inbox and scopes duplicate delivery keys", async () => {
+    const legacyMiniflare = new Miniflare({
+      modules: true,
+      script: "export default { fetch() { return new Response('ok') } }",
+      d1Databases: { DB: "polybill-legacy-inbox" },
+    });
+    try {
+      const legacyDb = await legacyMiniflare.getD1Database("DB");
+      await legacyDb.exec(await migration("0001_control_plane.sql"));
+      await legacyDb
+        .prepare(
+          "INSERT INTO polybill_inbox (tenant_id, connection_id, environment, external_delivery_key, provider_event_id, received_at, verified_at, raw_body_digest, raw_body, verification_key_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          tenantId,
+          connectionId,
+          "test",
+          "legacy-delivery",
+          "evt_legacy",
+          now,
+          now,
+          "legacy-digest",
+          new TextEncoder().encode('{"type":"payment.succeeded"}'),
+          "legacy-key",
+          "processing",
+        )
+        .run();
+      await legacyDb.exec(await migration("0009_inbox_scope.sql"));
+      const migrated = await legacyDb
+        .prepare(
+          "SELECT tenant_id, connection_id, environment, external_delivery_key, provider_event_id, state FROM polybill_inbox WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
+        )
+        .bind(tenantId, connectionId, "test", "legacy-delivery")
+        .first();
+      expect(migrated).toEqual({
+        tenant_id: tenantId,
+        connection_id: connectionId,
+        environment: "test",
+        external_delivery_key: "legacy-delivery",
+        provider_event_id: "evt_legacy",
+        state: "processing",
+      });
+    } finally {
+      await legacyMiniflare.dispose();
+    }
+
+    const inbox = new D1WebhookInbox(db);
+    const first = inboxRecord(tenantId, connectionId, "test", "legacy-delivery");
+    const otherTenant = inboxRecord(
+      parseId<"TenantId">("ten_d1other01", "ten"),
+      connectionId,
+      "test",
+      "legacy-delivery",
+    );
+    const live = inboxRecord(tenantId, connectionId, "live", "legacy-delivery");
+
+    await expect(inbox.claim(first)).resolves.toBe("claimed");
+    await expect(inbox.claim(otherTenant)).resolves.toBe("claimed");
+    await expect(inbox.claim(live)).resolves.toBe("claimed");
+    await expect(inbox.claim(first)).resolves.toBe("duplicate_processing");
+
+    const rows = await db
+      .prepare(
+        "SELECT tenant_id, environment FROM polybill_inbox WHERE connection_id = ? AND external_delivery_key = ? ORDER BY tenant_id, environment",
+      )
+      .bind(connectionId, "legacy-delivery")
+      .all<{ tenant_id: string; environment: string }>();
+    expect(rows.results).toEqual([
+      { tenant_id: "ten_d1contract", environment: "live" },
+      { tenant_id: "ten_d1contract", environment: "test" },
+      { tenant_id: "ten_d1other01", environment: "test" },
+    ]);
   });
 
   it("persists idempotency recovery and replays the completed result", async () => {
@@ -699,4 +775,31 @@ function secretCrypto() {
     activeEncryptionKeyId: "test-key",
     encryptionKeys: { "test-key": new Uint8Array(32).fill(12) },
   });
+}
+
+function inboxRecord(
+  tenant: ReturnType<typeof parseId<"TenantId">>,
+  connection: ReturnType<typeof parseId<"ConnectionId">>,
+  environment: "test" | "live",
+  deliveryKey: string,
+) {
+  return {
+    tenantId: tenant,
+    connection: {
+      id: connection,
+      tenantId: tenant,
+      provider: "stripe" as const,
+      environment,
+    },
+    deliveryKey,
+    receivedAt: now,
+    verified: {
+      provider: "stripe" as const,
+      environment,
+      deliveryKey,
+      rawBody: new TextEncoder().encode('{"type":"payment.succeeded"}'),
+      verifiedAt: now,
+      keyId: "fixture-key",
+    },
+  };
 }

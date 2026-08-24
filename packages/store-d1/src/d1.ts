@@ -31,7 +31,7 @@ export class D1WebhookInbox implements WebhookInboxStore {
   async claim(record: InboxRecord): Promise<InboxClaim> {
     const inserted = await this.#db
       .prepare(
-        `INSERT INTO polybill_inbox (tenant_id, connection_id, environment, external_delivery_key, provider_event_id, received_at, verified_at, raw_body_digest, raw_body, verification_key_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing') ON CONFLICT(connection_id, external_delivery_key) DO NOTHING`,
+        `INSERT INTO polybill_inbox (tenant_id, connection_id, environment, external_delivery_key, provider_event_id, received_at, verified_at, raw_body_digest, raw_body, verification_key_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing') ON CONFLICT DO NOTHING`,
       )
       .bind(
         record.tenantId,
@@ -49,9 +49,14 @@ export class D1WebhookInbox implements WebhookInboxStore {
     if (inserted.meta?.changes === 1) return "claimed";
     const existing = await this.#db
       .prepare(
-        "SELECT state FROM polybill_inbox WHERE connection_id = ? AND external_delivery_key = ?",
+        "SELECT state FROM polybill_inbox WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
       )
-      .bind(record.connection.id, record.deliveryKey)
+      .bind(
+        record.tenantId,
+        record.connection.id,
+        record.connection.environment,
+        record.deliveryKey,
+      )
       .first<{ state: D1InboxRow["state"] }>();
     return existing?.state === "applied" ? "duplicate_applied" : "duplicate_processing";
   }
@@ -66,21 +71,28 @@ export class D1WebhookInbox implements WebhookInboxStore {
     );
     const applied = this.#db
       .prepare(
-        "UPDATE polybill_inbox SET state = 'applied', attempts = attempts + 1, last_error_code = NULL WHERE connection_id = ? AND external_delivery_key = ?",
+        "UPDATE polybill_inbox SET state = 'applied', attempts = attempts + 1, last_error_code = NULL WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
       )
-      .bind(record.connection.id, record.deliveryKey);
+      .bind(
+        record.tenantId,
+        record.connection.id,
+        record.connection.environment,
+        record.deliveryKey,
+      );
     await this.#db.batch([...outbox, applied]);
   }
 
   async markFailed(record: InboxRecord, errorCode: string, retryable: boolean): Promise<void> {
     await this.#db
       .prepare(
-        "UPDATE polybill_inbox SET state = ?, attempts = attempts + 1, last_error_code = ? WHERE connection_id = ? AND external_delivery_key = ?",
+        "UPDATE polybill_inbox SET state = ?, attempts = attempts + 1, last_error_code = ? WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
       )
       .bind(
         retryable ? "retry_wait" : "dead_letter",
         errorCode,
+        record.tenantId,
         record.connection.id,
+        record.connection.environment,
         record.deliveryKey,
       )
       .run();

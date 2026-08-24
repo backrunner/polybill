@@ -18,7 +18,7 @@ export class MemoryWebhookInbox implements WebhookInboxStore, WebhookQueue {
   }
 
   async claim(record: InboxRecord): Promise<InboxClaim> {
-    const key = `${record.connection.id}:${record.deliveryKey}`;
+    const key = `${record.tenantId}:${record.connection.id}:${record.connection.environment}:${record.deliveryKey}`;
     const existing = this.#records.get(key);
     if (existing !== undefined)
       return existing.state === "applied" ? "duplicate_applied" : "duplicate_processing";
@@ -50,11 +50,17 @@ export class MemoryWebhookInbox implements WebhookInboxStore, WebhookQueue {
   }
 
   state(connectionId: string, deliveryKey: string): StoredInbox["state"] | undefined {
-    return this.#records.get(`${connectionId}:${deliveryKey}`)?.state;
+    const entry = [...this.#records.entries()].find(([key]) => {
+      const parts = key.split(":");
+      return parts[1] === connectionId && parts[3] === deliveryKey;
+    });
+    return entry?.[1].state;
   }
 
   #require(record: InboxRecord): StoredInbox {
-    const existing = this.#records.get(`${record.connection.id}:${record.deliveryKey}`);
+    const existing = this.#records.get(
+      `${record.tenantId}:${record.connection.id}:${record.connection.environment}:${record.deliveryKey}`,
+    );
     if (existing === undefined) throw new Error("Inbox record was not claimed");
     return existing;
   }
