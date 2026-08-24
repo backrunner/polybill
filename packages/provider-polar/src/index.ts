@@ -4,6 +4,7 @@ import { polarCheckout } from "./checkout.js";
 import { polarCustomers } from "./customers.js";
 import { polarSubscriptions } from "./subscriptions.js";
 import { polarWebhooks } from "./webhooks.js";
+import { polarMigration } from "./migration.js";
 
 export function createPolarAdapter(): ProviderAdapter {
   return {
@@ -17,6 +18,7 @@ export function createPolarAdapter(): ProviderAdapter {
     customers: polarCustomers,
     checkout: polarCheckout,
     subscriptions: polarSubscriptions,
+    migration: polarMigration,
     webhooks: polarWebhooks,
     reconcile: {
       async checkout(context, externalId) {
