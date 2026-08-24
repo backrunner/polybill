@@ -22,5 +22,8 @@
   "dependencies": {
     "@polybill/adapter-kit": "workspace:^",
     "@polybill/core": "workspace:^"
+  },
+  "devDependencies": {
+    "vitest": "4.1.11"
   }
 }

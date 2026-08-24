@@ -14,4 +14,11 @@ export type {
   ProviderAdapter,
   ResolvedCredentials,
 } from "@polybill/adapter-kit";
+export {
+  createWebSecretCrypto,
+  type LicenseRecord,
+  type VoucherBatch,
+  type VoucherRecord,
+  type VoucherRedemption,
+} from "@polybill/licensing";
 export * from "@polybill/core";

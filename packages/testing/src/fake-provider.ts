@@ -4,11 +4,16 @@ import {
   type CapabilitySnapshot,
   type ProviderAdapter,
   type ProviderCheckoutSnapshot,
+  type ProviderCustomerSnapshot,
   type ProviderContext,
   type ProviderOperationResult,
+  type ProviderPriceSnapshot,
+  type ProviderProductSnapshot,
+  type ProviderRefundSnapshot,
+  type ProviderSubscriptionSnapshot,
   type VerifiedProviderEvent,
 } from "@polybill/adapter-kit";
-import { PolybillError, parseId, type CanonicalBillingEvent } from "@polybill/core";
+import { PolybillError, money, parseId, type CanonicalBillingEvent } from "@polybill/core";
 
 export interface FakeProviderOptions {
   readonly id?: string;
@@ -25,14 +30,19 @@ export interface FakeProvider extends ProviderAdapter {
 export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvider {
   const checkouts = new Map<string, ProviderCheckoutSnapshot>();
   const byKey = new Map<string, ProviderCheckoutSnapshot>();
+  const products = new Map<string, ProviderProductSnapshot>();
+  const prices = new Map<string, ProviderPriceSnapshot>();
+  const customers = new Map<string, ProviderCustomerSnapshot>();
+  const subscriptions = new Map<string, ProviderSubscriptionSnapshot>();
+  const refunds = new Map<string, ProviderRefundSnapshot>();
   let createCount = 0;
   let failAfterCreate = options.failAfterCreateOnce ?? false;
   const id = options.id ?? "default";
 
-  function result(
+  function result<T extends { readonly externalId: string; readonly rawStatus?: string }>(
     context: ProviderContext,
-    value: ProviderCheckoutSnapshot,
-  ): ProviderOperationResult<ProviderCheckoutSnapshot> {
+    value: T,
+  ): ProviderOperationResult<T> {
     return {
       value,
       evidence: {
@@ -40,7 +50,7 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         environment: context.connection.environment,
         externalId: value.externalId,
         observedAt: context.clock.now(),
-        rawStatus: value.rawStatus,
+        ...(value.rawStatus === undefined ? {} : { rawStatus: value.rawStatus }),
       },
       idempotency: "both",
       warnings: [],
@@ -67,7 +77,25 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         provider: "fake",
         adapterVersion: "0.1.0",
         providerApiVersion: "fake-v1",
-        capabilities: { "checkout.hosted": hosted, "checkout.multi_item": multi },
+        capabilities: {
+          "checkout.hosted": hosted,
+          "checkout.multi_item": multi,
+          "catalog.product.read": nativeCapability(),
+          "catalog.product.create": nativeCapability(),
+          "catalog.product.archive": nativeCapability(),
+          "catalog.price.read": nativeCapability(),
+          "catalog.price.create": nativeCapability(),
+          "catalog.price.retire": nativeCapability(),
+          "customer.read": nativeCapability(),
+          "customer.create": nativeCapability(),
+          "customer.update": nativeCapability(),
+          "customer.portal": nativeCapability(),
+          "subscription.create": nativeCapability(),
+          "subscription.read": nativeCapability(),
+          "subscription.cancel": nativeCapability(),
+          "refund.partial": nativeCapability(),
+          "refund.full": nativeCapability(),
+        },
         commercialTerms: {
           model,
           sellerOfRecord: model === "merchant_of_record" ? "provider" : "merchant",
@@ -79,6 +107,74 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         },
         observedAt: context.clock.now(),
       };
+    },
+    catalog: {
+      async createProduct(context, input) {
+        const value: ProviderProductSnapshot = {
+          externalId: `fake_product_${products.size + 1}`,
+          name: input.name,
+          ...(input.description === undefined ? {} : { description: input.description }),
+          status: "active",
+          rawStatus: "active",
+        };
+        products.set(value.externalId, value);
+        return result(context, value);
+      },
+      async getProduct(context, externalId) {
+        return result(context, required(products, externalId));
+      },
+      async archiveProduct(context, externalId) {
+        const value = { ...required(products, externalId), status: "archived" as const };
+        products.set(externalId, value);
+        return result(context, value);
+      },
+      async createPrice(context, input) {
+        const value: ProviderPriceSnapshot = {
+          externalId: `fake_price_${prices.size + 1}`,
+          externalProductId: input.externalProductId,
+          model: input.model,
+          status: "active",
+          rawStatus: "active",
+        };
+        prices.set(value.externalId, value);
+        return result(context, value);
+      },
+      async getPrice(context, externalId) {
+        return result(context, required(prices, externalId));
+      },
+      async retirePrice(context, externalId) {
+        const value = { ...required(prices, externalId), status: "retired" as const };
+        prices.set(externalId, value);
+        return result(context, value);
+      },
+    },
+    customers: {
+      async create(context, input) {
+        const value: ProviderCustomerSnapshot = {
+          externalId: `fake_customer_${customers.size + 1}`,
+          ...(input.email === undefined ? {} : { email: input.email }),
+          ...(input.name === undefined ? {} : { name: input.name }),
+          status: "active",
+        };
+        customers.set(value.externalId, value);
+        return result(context, value);
+      },
+      async get(context, externalId) {
+        return result(context, required(customers, externalId));
+      },
+      async update(context, externalId, input) {
+        const current = required(customers, externalId);
+        const value = { ...current, ...input };
+        customers.set(externalId, value);
+        return result(context, value);
+      },
+      async portal(context, externalId) {
+        required(customers, externalId);
+        return result(context, {
+          externalId,
+          url: `https://portal.fake.invalid/${externalId}`,
+        });
+      },
     },
     checkout: {
       async create(context, command) {
@@ -120,6 +216,50 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         return found === undefined ? undefined : result(context, found);
       },
     },
+    subscriptions: {
+      async create(context, input) {
+        const value: ProviderSubscriptionSnapshot = {
+          externalId: `fake_subscription_${subscriptions.size + 1}`,
+          externalCustomerId: input.externalCustomerId,
+          status: input.trial === undefined ? "active" : "trialing",
+          items: input.items,
+          cancelAtPeriodEnd: false,
+          rawStatus: input.trial === undefined ? "active" : "trialing",
+        };
+        subscriptions.set(value.externalId, value);
+        return result(context, value);
+      },
+      async get(context, externalId) {
+        return result(context, required(subscriptions, externalId));
+      },
+      async cancel(context, externalId, timing) {
+        const current = required(subscriptions, externalId);
+        const value: ProviderSubscriptionSnapshot = {
+          ...current,
+          status: timing === "immediately" ? "canceled" : current.status,
+          cancelAtPeriodEnd: timing === "period_end",
+          rawStatus: timing === "immediately" ? "canceled" : "active_canceling",
+        };
+        subscriptions.set(externalId, value);
+        return result(context, value);
+      },
+    },
+    refunds: {
+      async create(context, input) {
+        const value: ProviderRefundSnapshot = {
+          externalId: `fake_refund_${refunds.size + 1}`,
+          externalPaymentId: input.externalPaymentId,
+          amount: input.amount ?? money("0", "USD"),
+          status: "succeeded",
+          rawStatus: "succeeded",
+        };
+        refunds.set(value.externalId, value);
+        return result(context, value);
+      },
+      async get(context, externalId) {
+        return result(context, required(refunds, externalId));
+      },
+    },
     webhooks: {
       async verify(input): Promise<VerifiedProviderEvent> {
         return {
@@ -137,4 +277,10 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
     reconcile: { checkout: async () => [] },
   };
   return adapter;
+}
+
+function required<T>(values: ReadonlyMap<string, T>, key: string): T {
+  const value = values.get(key);
+  if (value === undefined) throw new Error("Fake provider resource was not found");
+  return value;
 }

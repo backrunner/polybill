@@ -10,7 +10,7 @@ export const STRIPE_API_VERSION = "2025-08-27.basil";
 
 export async function stripeRequest(
   context: ProviderContext,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: URLSearchParams,
 ): Promise<HttpResponse> {

@@ -8,7 +8,13 @@ import {
   type ResolvedCredentials,
 } from "@polybill/adapter-kit";
 import {
+  CatalogService,
   CheckoutService,
+  CommerceQueryService,
+  CustomerService,
+  RefundService,
+  ResourceRuntime,
+  SubscriptionService,
   type ApplicationStore,
   type IdGenerator,
   type Logger,
@@ -21,6 +27,12 @@ import {
   type ConnectionRef,
   type TenantId,
 } from "@polybill/core";
+import {
+  LicenseService,
+  VoucherService,
+  type LicensingStore,
+  type SecretCrypto,
+} from "@polybill/licensing";
 import { noopLogger, SecureIdGenerator, systemClock } from "./runtime.js";
 
 export interface PolybillOptions {
@@ -36,10 +48,30 @@ export interface PolybillOptions {
   readonly logger?: Logger;
   readonly commercialPolicy?: CommercialPolicy;
   readonly timeoutMs?: number;
+  readonly licensing?: {
+    readonly store: LicensingStore;
+    readonly crypto: SecretCrypto;
+  };
 }
 
 export interface PolybillClient {
+  readonly catalog: CatalogService;
+  readonly customers: CustomerService;
   readonly checkouts: CheckoutService;
+  readonly orders: {
+    get(
+      id: Parameters<CommerceQueryService["order"]>[0],
+    ): ReturnType<CommerceQueryService["order"]>;
+  };
+  readonly payments: {
+    get(
+      id: Parameters<CommerceQueryService["payment"]>[0],
+    ): ReturnType<CommerceQueryService["payment"]>;
+  };
+  readonly refunds: RefundService;
+  readonly subscriptions: SubscriptionService;
+  readonly licenses: LicenseService | undefined;
+  readonly vouchers: VoucherService | undefined;
   getCapabilities(): Promise<CapabilitySnapshot>;
 }
 
@@ -66,9 +98,37 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
       : { commercialPolicy: options.commercialPolicy }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   };
+  const resources = new ResourceRuntime(shared);
+  const queries = new CommerceQueryService(resources);
+  const licenses =
+    options.licensing === undefined
+      ? undefined
+      : new LicenseService({
+          store: options.licensing.store,
+          crypto: options.licensing.crypto,
+          ids,
+          clock,
+        });
+  const vouchers =
+    options.licensing === undefined
+      ? undefined
+      : new VoucherService({
+          store: options.licensing.store,
+          crypto: options.licensing.crypto,
+          ids,
+          clock,
+        });
 
   return {
+    catalog: new CatalogService(resources),
+    customers: new CustomerService(resources),
     checkouts: new CheckoutService(shared),
+    orders: { get: (id) => queries.order(id) },
+    payments: { get: (id) => queries.payment(id) },
+    refunds: new RefundService(resources),
+    subscriptions: new SubscriptionService(resources),
+    licenses,
+    vouchers,
     async getCapabilities() {
       const context = await providerContext(shared, undefined);
       return options.adapter.getCapabilities(context);

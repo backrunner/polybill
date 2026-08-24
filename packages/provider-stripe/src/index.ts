@@ -1,6 +1,10 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { stripeCapabilities } from "./capabilities.js";
+import { stripeCatalog } from "./catalog.js";
 import { stripeCheckout } from "./checkout.js";
+import { stripeCustomers } from "./customers.js";
+import { stripeRefunds } from "./refunds.js";
+import { stripeSubscriptions } from "./subscriptions.js";
 import { stripeWebhooks } from "./webhooks.js";
 
 export function createStripeAdapter(): ProviderAdapter {
@@ -12,7 +16,11 @@ export function createStripeAdapter(): ProviderAdapter {
       maturity: "experimental",
     },
     getCapabilities: async (context) => stripeCapabilities(context),
+    catalog: stripeCatalog,
+    customers: stripeCustomers,
     checkout: stripeCheckout,
+    subscriptions: stripeSubscriptions,
+    refunds: stripeRefunds,
     webhooks: stripeWebhooks,
     reconcile: {
       async checkout(context, externalId) {

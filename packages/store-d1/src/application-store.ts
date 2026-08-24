@@ -3,6 +3,7 @@ import type {
   CheckoutCommit,
   IdempotencyClaim,
   IdempotencyScope,
+  ResourceCommit,
 } from "@polybill/application";
 import type { CheckoutSession, Price, TenantId } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
@@ -102,11 +103,18 @@ export class D1ApplicationStore implements ApplicationStore {
   }
 
   async getPrice(tenantId: TenantId, priceId: string): Promise<Price | undefined> {
-    const row = await this.#db
+    const catalog = await this.#db
       .prepare("SELECT value FROM polybill_catalog_prices WHERE tenant_id = ? AND price_id = ?")
       .bind(tenantId, priceId)
       .first<{ value: string }>();
-    return row === null ? undefined : decodePrice(row.value);
+    if (catalog !== null) return decodePrice(catalog.value);
+    const snapshot = await this.#db
+      .prepare(
+        "SELECT snapshot AS value FROM polybill_snapshots WHERE tenant_id = ? AND aggregate_type = 'price' AND aggregate_id = ?",
+      )
+      .bind(tenantId, priceId)
+      .first<{ value: string }>();
+    return snapshot === null ? undefined : decodePrice(snapshot.value);
   }
 
   async getExternalId(
@@ -122,6 +130,82 @@ export class D1ApplicationStore implements ApplicationStore {
       .bind(tenantId, connectionId, entityType, entityId)
       .first<{ external_id: string }>();
     return row?.external_id;
+  }
+
+  async findCanonicalId(
+    tenantId: TenantId,
+    connectionId: string,
+    entityType: string,
+    externalId: string,
+  ): Promise<string | undefined> {
+    const row = await this.#db
+      .prepare(
+        "SELECT entity_id FROM polybill_mappings WHERE tenant_id = ? AND connection_id = ? AND entity_type = ? AND external_id = ?",
+      )
+      .bind(tenantId, connectionId, entityType, externalId)
+      .first<{ entity_id: string }>();
+    return row?.entity_id;
+  }
+
+  async commitResource(commit: ResourceCommit): Promise<void> {
+    const statements = [
+      ...(commit.externalId === undefined
+        ? []
+        : [
+            this.#db
+              .prepare(
+                `INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, ?, ?, ?, 1, 'created') ON CONFLICT(tenant_id, connection_id, entity_type, entity_id) DO UPDATE SET external_id = excluded.external_id, mapping_version = polybill_mappings.mapping_version + 1 WHERE polybill_mappings.external_id = excluded.external_id`,
+              )
+              .bind(
+                commit.tenantId,
+                commit.connectionId,
+                commit.entityType,
+                commit.entityId,
+                commit.externalId,
+              ),
+          ]),
+      this.#db
+        .prepare(
+          `INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(tenant_id, aggregate_type, aggregate_id) DO UPDATE SET version = polybill_snapshots.version + 1, observed_at = excluded.observed_at, snapshot = excluded.snapshot`,
+        )
+        .bind(
+          commit.tenantId,
+          commit.entityType,
+          commit.entityId,
+          commit.occurredAt,
+          JSON.stringify(commit.value),
+        ),
+      this.#db
+        .prepare(
+          "INSERT INTO polybill_audit (tenant_id, operation, evidence, occurred_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(
+          commit.tenantId,
+          `${commit.entityType}.commit`,
+          JSON.stringify({ provider: commit.provider, value: commit.evidence ?? null }),
+          commit.occurredAt,
+        ),
+    ];
+    await this.#db.batch(statements);
+  }
+
+  async getResource<T>(
+    tenantId: TenantId,
+    entityType: string,
+    entityId: string,
+  ): Promise<T | undefined> {
+    const row = await this.#db
+      .prepare(
+        "SELECT snapshot FROM polybill_snapshots WHERE tenant_id = ? AND aggregate_type = ? AND aggregate_id = ?",
+      )
+      .bind(tenantId, entityType, entityId)
+      .first<{ snapshot: string }>();
+    if (row === null) return undefined;
+    try {
+      return JSON.parse(row.snapshot) as T;
+    } catch {
+      throw new TypeError("Stored D1 canonical resource is invalid JSON");
+    }
   }
 
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
@@ -146,6 +230,16 @@ export class D1ApplicationStore implements ApplicationStore {
           "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, 'order', ?, 1, ?, ?)",
         )
         .bind(commit.tenantId, commit.order.id, commit.occurredAt, JSON.stringify(commit.order)),
+      this.#db
+        .prepare(
+          "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, 'payment', ?, 1, ?, ?)",
+        )
+        .bind(
+          commit.tenantId,
+          commit.payment.id,
+          commit.occurredAt,
+          JSON.stringify(commit.payment),
+        ),
       this.#db
         .prepare(
           "INSERT INTO polybill_audit (tenant_id, operation, evidence, occurred_at) VALUES (?, 'checkout.commit', ?, ?)",

@@ -5,6 +5,7 @@ import type {
   IdempotencyKey,
   IsoDateTime,
   Order,
+  Payment,
   Price,
   ProviderName,
   TenantId,
@@ -52,6 +53,29 @@ export interface MappingReader {
     entityType: string,
     entityId: string,
   ): Promise<string | undefined>;
+  findCanonicalId(
+    tenantId: TenantId,
+    connectionId: ConnectionId,
+    entityType: string,
+    externalId: string,
+  ): Promise<string | undefined>;
+}
+
+export interface ResourceCommit {
+  readonly tenantId: TenantId;
+  readonly connectionId: ConnectionId;
+  readonly provider: ProviderName;
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly externalId?: string;
+  readonly value: unknown;
+  readonly evidence?: unknown;
+  readonly occurredAt: IsoDateTime;
+}
+
+export interface CanonicalResourceStore {
+  commitResource(commit: ResourceCommit): Promise<void>;
+  getResource<T>(tenantId: TenantId, entityType: string, entityId: string): Promise<T | undefined>;
 }
 
 export interface CheckoutCommit {
@@ -61,6 +85,7 @@ export interface CheckoutCommit {
   readonly externalCheckoutId: string;
   readonly checkout: CheckoutSession;
   readonly order: Order;
+  readonly payment: Payment;
   readonly evidenceId: EvidenceId;
   readonly evidence: unknown;
   readonly occurredAt: IsoDateTime;
@@ -72,7 +97,7 @@ export interface CheckoutStore {
 }
 
 export interface ApplicationStore
-  extends IdempotencyStore, CatalogReader, MappingReader, CheckoutStore {}
+  extends IdempotencyStore, CatalogReader, MappingReader, CheckoutStore, CanonicalResourceStore {}
 
 export interface IdGenerator {
   next(prefix: string): string;

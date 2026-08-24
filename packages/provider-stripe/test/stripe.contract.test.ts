@@ -117,4 +117,140 @@ describe("Stripe adapter contract", () => {
       code: "authentication_failed",
     });
   });
+
+  it("maps catalog, customer, portal, subscription, and refund resources", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/products",
+        response: Response.json({
+          id: "prod_fixture",
+          name: "Pro",
+          description: "Pro plan",
+          active: true,
+        }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/prices",
+        response: Response.json({
+          id: "price_fixture",
+          product: "prod_fixture",
+          active: true,
+          currency: "usd",
+          unit_amount: 2500,
+          recurring: { interval: "month", interval_count: 1 },
+        }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/customers",
+        response: Response.json({
+          id: "cus_fixture",
+          email: "buyer@example.com",
+          name: "Buyer",
+        }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/billing_portal/sessions",
+        response: Response.json({ url: "https://billing.stripe.test/session" }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/subscriptions",
+        response: Response.json({
+          id: "sub_fixture",
+          customer: "cus_fixture",
+          status: "active",
+          items: { data: [{ price: { id: "price_fixture" }, quantity: 2 }] },
+          current_period_start: 1756080000,
+          current_period_end: 1758758400,
+          cancel_at_period_end: false,
+        }),
+      },
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/refunds",
+        response: Response.json({
+          id: "re_fixture",
+          payment_intent: "pi_fixture",
+          amount: 500,
+          currency: "usd",
+          status: "succeeded",
+        }),
+      },
+    ]);
+    const adapter = createStripeAdapter();
+    const ctx = context(scripted.fetch);
+    await expect(
+      adapter.catalog?.createProduct(ctx, {
+        name: "Pro",
+        description: "Pro plan",
+        metadata: { source: "polybill" },
+      }),
+    ).resolves.toMatchObject({ value: { externalId: "prod_fixture", status: "active" } });
+    await expect(
+      adapter.catalog?.createPrice(ctx, {
+        externalProductId: "prod_fixture",
+        model: {
+          kind: "recurring",
+          unit: money("2500", "USD"),
+          interval: { unit: "month", count: 1 },
+        },
+        taxBehavior: "exclusive",
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ value: { externalId: "price_fixture", status: "active" } });
+    await expect(
+      adapter.customers?.create(ctx, {
+        email: "buyer@example.com",
+        name: "Buyer",
+        externalReference: parseId<"CustomerId">("cust_fixture", "cust"),
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ value: { externalId: "cus_fixture", status: "active" } });
+    await expect(
+      adapter.customers?.portal?.(ctx, "cus_fixture", "https://merchant.example/billing"),
+    ).resolves.toMatchObject({ value: { url: "https://billing.stripe.test/session" } });
+    await expect(
+      adapter.subscriptions?.create(ctx, {
+        externalCustomerId: "cus_fixture",
+        items: [{ externalPriceId: "price_fixture", quantity: 2 }],
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ value: { externalId: "sub_fixture", status: "active" } });
+    await expect(
+      adapter.refunds?.create(ctx, {
+        externalPaymentId: "pi_fixture",
+        amount: money("500", "USD"),
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({
+      value: { externalId: "re_fixture", amount: money("500", "USD") },
+    });
+    expect(await scripted.requests[1]?.clone().text()).toContain("recurring%5Binterval%5D=month");
+    expect(await scripted.requests[4]?.clone().text()).toContain(
+      "items%5B0%5D%5Bprice%5D=price_fixture",
+    );
+    scripted.assertConsumed();
+  });
+
+  it("rejects a lossy subscription trial conversion before transport", async () => {
+    const adapter = createStripeAdapter();
+    let calls = 0;
+    const fetch: typeof globalThis.fetch = async () => {
+      calls += 1;
+      return Response.json({});
+    };
+    await expect(
+      adapter.subscriptions?.create(context(fetch), {
+        externalCustomerId: "cus_fixture",
+        items: [{ externalPriceId: "price_fixture", quantity: 1 }],
+        trial: { unit: "month", count: 1 },
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    expect(calls).toBe(0);
+  });
 });

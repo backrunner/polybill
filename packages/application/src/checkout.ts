@@ -303,6 +303,7 @@ export class CheckoutService {
       externalCheckoutId: remote.value.externalId,
       checkout: result.checkout,
       order: result.order,
+      payment: result.payment,
       evidenceId: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
       evidence: remote.evidence,
       occurredAt: this.#options.clock.now(),

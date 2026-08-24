@@ -3,6 +3,7 @@ import type {
   CheckoutCommit,
   IdempotencyClaim,
   IdempotencyScope,
+  ResourceCommit,
 } from "@polybill/application";
 import type { CheckoutSession, Price, TenantId } from "@polybill/core";
 
@@ -20,6 +21,8 @@ export class MemoryStore implements ApplicationStore {
   readonly #prices = new Map<string, Price>();
   readonly #checkouts = new Map<string, CheckoutSession>();
   readonly #mappings = new Map<string, string>();
+  readonly #reverseMappings = new Map<string, string>();
+  readonly #resources = new Map<string, unknown>();
   readonly #commits: CheckoutCommit[] = [];
   #leaseSequence = 0;
 
@@ -35,6 +38,7 @@ export class MemoryStore implements ApplicationStore {
     externalId: string,
   ): void {
     this.#mappings.set(`${tenantId}:${connectionId}:${entityType}:${entityId}`, externalId);
+    this.#reverseMappings.set(`${tenantId}:${connectionId}:${entityType}:${externalId}`, entityId);
   }
 
   get commits(): readonly CheckoutCommit[] {
@@ -90,8 +94,10 @@ export class MemoryStore implements ApplicationStore {
   }
 
   async getPrice(tenantId: TenantId, priceId: string): Promise<Price | undefined> {
-    const value = this.#prices.get(`${tenantId}:${priceId}`);
-    return value === undefined ? undefined : globalThis.structuredClone(value);
+    const seeded = this.#prices.get(`${tenantId}:${priceId}`);
+    return seeded === undefined
+      ? this.getResource<Price>(tenantId, "price", priceId)
+      : globalThis.structuredClone(seeded);
   }
 
   async getExternalId(
@@ -101,6 +107,37 @@ export class MemoryStore implements ApplicationStore {
     entityId: string,
   ): Promise<string | undefined> {
     return this.#mappings.get(`${tenantId}:${connectionId}:${entityType}:${entityId}`);
+  }
+
+  async findCanonicalId(
+    tenantId: TenantId,
+    connectionId: string,
+    entityType: string,
+    externalId: string,
+  ): Promise<string | undefined> {
+    return this.#reverseMappings.get(`${tenantId}:${connectionId}:${entityType}:${externalId}`);
+  }
+
+  async commitResource(commit: ResourceCommit): Promise<void> {
+    const key = `${commit.tenantId}:${commit.entityType}:${commit.entityId}`;
+    this.#resources.set(key, globalThis.structuredClone(commit.value));
+    if (commit.externalId !== undefined)
+      this.seedMapping(
+        commit.tenantId,
+        commit.connectionId,
+        commit.entityType,
+        commit.entityId,
+        commit.externalId,
+      );
+  }
+
+  async getResource<T>(
+    tenantId: TenantId,
+    entityType: string,
+    entityId: string,
+  ): Promise<T | undefined> {
+    const value = this.#resources.get(`${tenantId}:${entityType}:${entityId}`);
+    return value === undefined ? undefined : (globalThis.structuredClone(value) as T);
   }
 
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
@@ -113,6 +150,14 @@ export class MemoryStore implements ApplicationStore {
       throw new Error("External checkout mapping already exists");
     }
     this.#checkouts.set(checkoutKey, globalThis.structuredClone(commit.checkout));
+    this.#resources.set(
+      `${commit.tenantId}:order:${commit.order.id}`,
+      globalThis.structuredClone(commit.order),
+    );
+    this.#resources.set(
+      `${commit.tenantId}:payment:${commit.payment.id}`,
+      globalThis.structuredClone(commit.payment),
+    );
     this.#commits.push(globalThis.structuredClone(commit));
   }
 

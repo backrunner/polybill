@@ -83,6 +83,9 @@ importers:
       '@polybill/core':
         specifier: workspace:^
         version: link:../core
+      '@polybill/licensing':
+        specifier: workspace:^
+        version: link:../licensing
     devDependencies:
       '@polybill/store-memory':
         specifier: workspace:^
@@ -99,6 +102,10 @@ importers:
       '@polybill/core':
         specifier: workspace:^
         version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
 
   packages/provider-dodo:
     dependencies:
@@ -124,6 +131,10 @@ importers:
       '@polybill/core':
         specifier: workspace:^
         version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
 
   packages/provider-paddle:
     dependencies:
@@ -133,6 +144,10 @@ importers:
       '@polybill/core':
         specifier: workspace:^
         version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
 
   packages/provider-polar:
     dependencies:
@@ -174,6 +189,10 @@ importers:
       '@polybill/core':
         specifier: workspace:^
         version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.10.13)(vite@8.2.2(@types/node@24.10.13)(yaml@2.9.0))
 
   packages/provider-x402:
     dependencies:

@@ -7,6 +7,7 @@ import {
   parseIsoDateTime,
   type CheckoutSession,
   type Order,
+  type Payment,
   type Price,
 } from "@polybill/core";
 import { createWebSecretCrypto, LicenseService, VoucherService } from "@polybill/licensing";
@@ -91,6 +92,14 @@ describe("D1 control-plane contract", () => {
       url: "https://checkout.example/session",
     };
     const order = fixtureOrder(checkout.orderId, price);
+    const payment: Payment = {
+      id: parseId<"PaymentId">("pay_d1contract", "pay"),
+      orderId: order.id,
+      status: "pending",
+      amount: order.total,
+      refundedAmount: money("0", "USD"),
+      evidence: [],
+    };
     await store.commitCheckout({
       tenantId,
       connectionId,
@@ -98,11 +107,13 @@ describe("D1 control-plane contract", () => {
       externalCheckoutId: "cs_external",
       checkout,
       order,
+      payment,
       evidenceId: parseId<"EvidenceId">("evi_d1contract", "evi"),
       evidence: { requestId: "req_external" },
       occurredAt: now,
     });
     await expect(store.getCheckout(tenantId, checkout.id)).resolves.toEqual(checkout);
+    await expect(store.getResource(tenantId, "payment", payment.id)).resolves.toEqual(payment);
     await expect(
       store.getExternalId(tenantId, connectionId, "checkout", checkout.id),
     ).resolves.toBe("cs_external");
