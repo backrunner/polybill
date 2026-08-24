@@ -1,0 +1,4 @@
+interface:
+  display_name: "Polybill Development"
+  short_description: "Develop portable billing adapters and domain logic"
+  default_prompt: "Use $polybill-development to implement or review a Polybill change."
