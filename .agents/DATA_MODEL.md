@@ -157,6 +157,17 @@ idempotency key。Order 的 refunded amount 是 refund ledger 聚合结果，不
 保留 provider deadline 和 evidence URL。不同 MoR 的争议响应能力不统一，因此 core 先保证
 读取和事件同步，写操作通过 capability extension。
 
+### Discount
+
+Discount 是独立 canonical resource，不等同于 provider coupon ID。它支持 fixed `Money` 或整数
+basis points 百分比、有效时间窗、全局和单 beneficiary 次数限制、SKU/customer allowlist 与
+active/archive 状态。百分比按 eligible subtotal 向下取整；fixed amount 不能超过 eligible subtotal，
+Order net total 永远不能为负。所有 line 必须同币种，fixed discount 必须与 Order currency 相同。
+
+checkout 使用折扣前必须原子 reserve redemption，并把 canonical Discount 映射到当前 connection 的
+provider discount。远端结果未知时保留 reservation 供 recovery；明确失败时释放；成功后 finalize。
+没有 provider mapping 或无法证明 provider 净额等于 canonical net total 时，必须在 transport 前拒绝。
+
 ## 5. Subscription aggregate
 
 ```ts

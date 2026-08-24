@@ -10,6 +10,7 @@ export type CheckoutId = Brand<string, "CheckoutId">;
 export type OrderId = Brand<string, "OrderId">;
 export type PaymentId = Brand<string, "PaymentId">;
 export type RefundId = Brand<string, "RefundId">;
+export type DiscountId = Brand<string, "DiscountId">;
 export type SubscriptionId = Brand<string, "SubscriptionId">;
 export type EventId = Brand<string, "EventId">;
 export type EvidenceId = Brand<string, "EvidenceId">;

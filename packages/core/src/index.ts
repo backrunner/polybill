@@ -2,6 +2,7 @@ export * from "./brand.js";
 export * from "./catalog.js";
 export * from "./commerce.js";
 export * from "./commercial.js";
+export * from "./discount.js";
 export * from "./errors.js";
 export * from "./events.js";
 export * from "./ids.js";
