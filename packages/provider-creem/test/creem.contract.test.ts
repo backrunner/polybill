@@ -5,6 +5,12 @@ import { describe, expect, it } from "vitest";
 import { createCreemAdapter } from "../src/index.js";
 
 describe("Creem webhook contract", () => {
+  it("does not claim synchronous subscription creation", async () => {
+    const capability = (await createCreemAdapter().getCapabilities(context(globalThis.fetch)))
+      .capabilities["subscription.create"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("reports refund creation as unsupported without canonical read-back", async () => {
     const adapter = createCreemAdapter();
     const capabilities = await adapter.getCapabilities(context(globalThis.fetch));

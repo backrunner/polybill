@@ -24,8 +24,8 @@ export async function planMigration(input: MigrationPlanInput): Promise<Migratio
     targetConnectionId: input.targetConnectionId,
     mode: input.mode,
     phase: responsibilityLosses.some((loss) => loss.blocking) ? "blocked" : "planned",
-    sourceCapabilitiesHash: await snapshotHash(input.sourceCapabilities),
-    targetCapabilitiesHash: await snapshotHash(input.targetCapabilities),
+    sourceCapabilitiesHash: await capabilitySnapshotHash(input.sourceCapabilities),
+    targetCapabilitiesHash: await capabilitySnapshotHash(input.targetCapabilities),
     items,
     losses: [...responsibilityLosses, ...items.flatMap((item) => item.losses)],
     createdAt: input.createdAt,
@@ -184,7 +184,7 @@ function loss(code: string, message: string, blocking: boolean): MigrationLoss {
   return { code, message, blocking };
 }
 
-async function snapshotHash(snapshot: CapabilitySnapshot): Promise<string> {
+export async function capabilitySnapshotHash(snapshot: CapabilitySnapshot): Promise<string> {
   const value = stable(snapshot);
   const digest = new Uint8Array(
     await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),

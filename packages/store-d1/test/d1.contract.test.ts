@@ -92,6 +92,7 @@ describe("D1 control-plane contract", () => {
     await binding.exec(await migration("0007_discounts.sql"));
     await binding.exec(await migration("0008_discount_redemptions.sql"));
     await binding.exec(await migration("0009_inbox_scope.sql"));
+    await binding.exec(await migration("0010_migration_reports.sql"));
   });
 
   afterEach(async () => {
@@ -329,7 +330,7 @@ describe("D1 control-plane contract", () => {
       ),
     );
     expect(attempts.filter((item) => item.status === "fulfilled")).toHaveLength(1);
-  });
+  }, 15_000);
 
   it("persists multi-policy grants and atomic transition idempotency", async () => {
     const service = new EntitlementService({

@@ -39,6 +39,12 @@ describe("Dodo adapter contract", () => {
     expect(capability).toMatchObject({ support: "unsupported" });
   });
 
+  it("does not claim synchronous subscription creation", async () => {
+    const capability = (await createDodoAdapter().getCapabilities(context(globalThis.fetch)))
+      .capabilities["subscription.create"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("creates checkout sessions only from mapped catalog products", async () => {
     const scripted = createScriptedFetch([
       {

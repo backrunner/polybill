@@ -1,5 +1,5 @@
 import type { MigrationItemClaim, MigrationStore } from "./ports.js";
-import type { AdoptionMode, MigrationItemResult, MigrationPlan } from "./types.js";
+import type { AdoptionMode, MigrationItemResult, MigrationPlan, MigrationReport } from "./types.js";
 
 export class MemoryMigrationStore implements MigrationStore {
   readonly #plans = new Map<string, MigrationPlan>();
@@ -8,6 +8,7 @@ export class MemoryMigrationStore implements MigrationStore {
     { state: "processing" | "completed" | "failed"; leaseToken?: string; leaseExpiresAt?: number }
   >();
   readonly #results = new Map<string, MigrationItemResult>();
+  readonly #reports = new Map<string, MigrationReport>();
   readonly #checkpoints = new Map<string, { cursor?: string; sequence: number }>();
   readonly #now: () => number;
   readonly #leaseToken: () => string;
@@ -76,6 +77,12 @@ export class MemoryMigrationStore implements MigrationStore {
       .filter(([key]) => key.startsWith(`${planId}:`))
       .map(([, value]) => clone(value))
       .sort((left, right) => left.itemKey.localeCompare(right.itemKey));
+  }
+  async saveReport(report: MigrationReport): Promise<void> {
+    this.#reports.set(report.planId, clone(report));
+  }
+  async getReport(planId: string): Promise<MigrationReport | undefined> {
+    return cloned(this.#reports.get(planId));
   }
   async saveCheckpoint(
     planId: string,

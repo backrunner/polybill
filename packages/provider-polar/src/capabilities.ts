@@ -32,6 +32,10 @@ export function polarCapabilities(context: ProviderContext): CapabilitySnapshot 
       "customer.update": native,
       "customer.delete": native,
       "customer.portal": native,
+      "subscription.create": unsupportedCapability(
+        "Polar creates subscriptions through checkout sessions after customer authorization; no standalone create operation can satisfy the canonical synchronous subscription command",
+        ["Create a checkout session for the mapped recurring product"],
+      ),
       "subscription.read": native,
       "subscription.cancel": native,
       "subscription.resume": native,

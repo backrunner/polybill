@@ -34,6 +34,10 @@ export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot
       "customer.update": native,
       "customer.delete": native,
       "customer.portal": native,
+      "subscription.create": unsupportedCapability(
+        "Paddle Billing creates subscriptions as part of a paid transaction; no standalone create endpoint can satisfy the canonical synchronous subscription command",
+        ["Create a transaction or hosted checkout for the mapped recurring prices"],
+      ),
       "subscription.read": native,
       "subscription.change_items": {
         ...native,

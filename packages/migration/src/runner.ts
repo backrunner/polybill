@@ -1,3 +1,5 @@
+import type { CapabilitySnapshot } from "@polybill/adapter-kit";
+import { capabilitySnapshotHash } from "./planner.js";
 import type { MigrationStore, MigrationTarget } from "./ports.js";
 import type {
   MigrationItemResult,
@@ -10,7 +12,23 @@ import type {
 export interface MigrationRunnerOptions {
   readonly store: MigrationStore;
   readonly target: MigrationTarget;
+  /** Optional for offline runners; production apply/verify should inject it. */
+  readonly capabilities?: () => Promise<MigrationExecutionCapabilities>;
   readonly stopAfterItems?: number;
+}
+
+export interface MigrationExecutionCapabilities {
+  readonly source: CapabilitySnapshot;
+  readonly target: CapabilitySnapshot;
+}
+
+export class MigrationCapabilityDriftError extends Error {
+  readonly code = "migration_capability_drift";
+
+  constructor() {
+    super("Migration plan capabilities changed; create and approve a new plan");
+    this.name = "MigrationCapabilityDriftError";
+  }
 }
 
 export class MigrationRunner {
@@ -31,12 +49,18 @@ export class MigrationRunner {
         evidence: { differences: preview.differences, action: item.action },
       });
     }
-    return report(plan, "dry_run", results);
+    const output = report(plan, "dry_run", results);
+    await this.#options.store.saveReport(output);
+    return output;
   }
 
   async apply(plan: MigrationPlan): Promise<MigrationReport> {
-    if (plan.phase === "blocked" || plan.losses.some((loss) => loss.blocking))
-      return report(plan, "blocked", await this.#options.store.listResults(plan.id));
+    if (plan.phase === "blocked" || plan.losses.some((loss) => loss.blocking)) {
+      const output = report(plan, "blocked", await this.#options.store.listResults(plan.id));
+      await this.#options.store.saveReport(output);
+      return output;
+    }
+    await this.#assertPlanCapabilities(plan);
     await this.#options.store.savePlan({ ...plan, phase: "applying" });
     let completedThisRun = 0;
     for (const [sequence, item] of ordered(plan).entries()) {
@@ -59,16 +83,30 @@ export class MigrationRunner {
           claim.leaseToken,
           error instanceof Error ? error.name : "unknown_error",
         );
+        const failedPlan = { ...plan, phase: "failed" as const };
+        await this.#options.store.savePlan(failedPlan);
+        await this.#options.store.saveReport(
+          report(failedPlan, "failed", await this.#options.store.listResults(plan.id)),
+        );
         throw error;
       }
     }
-    return report(plan, "applying", await this.#options.store.listResults(plan.id));
+    const results = await this.#options.store.listResults(plan.id);
+    const phase: MigrationPlan["phase"] =
+      results.length === plan.items.length ? "verifying" : "applying";
+    const nextPlan = { ...plan, phase };
+    await this.#options.store.savePlan(nextPlan);
+    const output = report(nextPlan, phase, results);
+    await this.#options.store.saveReport(output);
+    return output;
   }
 
   async verify(plan: MigrationPlan): Promise<readonly MigrationVerification[]> {
+    await this.#assertPlanCapabilities(plan);
+    await this.#options.store.savePlan({ ...plan, phase: "verifying" });
     const results = await this.#options.store.listResults(plan.id);
     const byKey = new Map(results.map((result) => [result.itemKey, result]));
-    return Promise.all(
+    const verifications = await Promise.all(
       ordered(plan).map((item) => {
         if (
           item.action === "keep_source_pinned" ||
@@ -84,14 +122,48 @@ export class MigrationRunner {
         return this.#options.target.verify(item, byKey.get(item.key)?.externalId);
       }),
     );
+    // Manual reauthorization/provider-assisted work is an approved migration outcome;
+    // only unresolved target differences or missing objects block cutover.
+    const ready =
+      verifications.every(
+        (verification) => verification.status === "matched" || verification.status === "manual",
+      ) && !plan.losses.some((loss) => loss.blocking);
+    const phase: MigrationPlan["phase"] = ready ? "ready" : "verifying";
+    const nextPlan = { ...plan, phase };
+    await this.#options.store.savePlan(nextPlan);
+    await this.#options.store.saveReport(report(nextPlan, nextPlan.phase, results, verifications));
+    return verifications;
   }
 
   async cutover(plan: MigrationPlan): Promise<void> {
+    await this.#assertPlanCapabilities(plan);
+    const saved = await this.#options.store.getPlan(plan.id);
+    if (saved?.phase !== "ready")
+      throw new Error("Migration plan must pass verification before cutover");
     await this.#options.store.setRouting(plan.mode, plan.id);
   }
 
   async cutback(plan: MigrationPlan, mode: "observe_only" | "shadow_read"): Promise<void> {
     await this.#options.store.setRouting(mode, plan.id);
+    await this.#options.store.savePlan({ ...plan, phase: "cutback" });
+    await this.#options.store.saveReport(
+      report(
+        { ...plan, phase: "cutback" },
+        "cutback",
+        await this.#options.store.listResults(plan.id),
+      ),
+    );
+  }
+
+  async #assertPlanCapabilities(plan: MigrationPlan): Promise<void> {
+    if (this.#options.capabilities === undefined) return;
+    const capabilities = await this.#options.capabilities();
+    const [sourceHash, targetHash] = await Promise.all([
+      capabilitySnapshotHash(capabilities.source),
+      capabilitySnapshotHash(capabilities.target),
+    ]);
+    if (sourceHash !== plan.sourceCapabilitiesHash || targetHash !== plan.targetCapabilitiesHash)
+      throw new MigrationCapabilityDriftError();
   }
 
   async #applyItem(plan: MigrationPlan, item: MigrationPlanItem): Promise<MigrationItemResult> {
@@ -144,6 +216,7 @@ function report(
   plan: MigrationPlan,
   phase: MigrationReport["phase"],
   results: readonly MigrationItemResult[],
+  verifications: readonly MigrationVerification[] = [],
 ): MigrationReport {
   const totals: Record<MigrationItemResult["status"], number> = {
     skipped: 0,
@@ -159,6 +232,7 @@ function report(
     phase,
     totals,
     results,
+    verifications,
     blockers: plan.losses.filter((loss) => loss.blocking),
   };
 }

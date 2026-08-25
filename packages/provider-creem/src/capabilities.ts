@@ -27,6 +27,10 @@ export function creemCapabilities(context: ProviderContext): CapabilitySnapshot 
       "customer.create": { ...native, constraints: { requiresEmail: true, requiresName: true } },
       "customer.update": { ...native, constraints: { emailImmutable: true } },
       "customer.portal": native,
+      "subscription.create": unsupportedCapability(
+        "Creem creates subscriptions as the result of a checkout; its public subscription API exposes lifecycle operations but no standalone create mutation",
+        ["Create a hosted checkout for the mapped recurring product"],
+      ),
       "subscription.read": native,
       "subscription.cancel": native,
       "subscription.pause": {

@@ -3,6 +3,7 @@ import type {
   MigrationItemClaim,
   MigrationItemResult,
   MigrationPlan,
+  MigrationReport,
   MigrationStore,
 } from "@polybill/migration";
 import type { TenantId } from "@polybill/core";
@@ -111,6 +112,23 @@ export class D1MigrationStore implements MigrationStore {
     return (rows.results ?? []).map((row) =>
       parseJson<MigrationItemResult>(row.value, "migration item result"),
     );
+  }
+
+  async saveReport(report: MigrationReport): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO polybill_migration_reports (tenant_id, plan_id, value) VALUES (?, ?, ?) ON CONFLICT(tenant_id, plan_id) DO UPDATE SET value = excluded.value`,
+      )
+      .bind(this.#tenantId, report.planId, JSON.stringify(report))
+      .run();
+  }
+
+  async getReport(planId: string): Promise<MigrationReport | undefined> {
+    const row = await this.#db
+      .prepare("SELECT value FROM polybill_migration_reports WHERE tenant_id = ? AND plan_id = ?")
+      .bind(this.#tenantId, planId)
+      .first<{ value: string }>();
+    return row === null ? undefined : parseJson<MigrationReport>(row.value, "migration report");
   }
 
   async saveCheckpoint(

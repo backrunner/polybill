@@ -3,6 +3,7 @@ import { parseId, parseIsoDateTime } from "@polybill/core";
 import { describe, expect, it } from "vitest";
 import {
   MemoryMigrationStore,
+  MigrationCapabilityDriftError,
   MigrationRunner,
   analyzeSource,
   importSourceItems,
@@ -45,6 +46,25 @@ describe("migration toolkit", () => {
     expect(target.writeCount).toBe(2);
     await new MigrationRunner({ store, target }).apply(plan);
     expect(target.writeCount).toBe(2);
+  });
+
+  it("persists reports and blocks writes when capabilities drift", async () => {
+    const store = new MemoryMigrationStore();
+    const target = fakeTarget();
+    const plan = await productPlan();
+    const dryRun = await new MigrationRunner({ store, target }).dryRun(plan);
+    await expect(store.getReport(plan.id)).resolves.toEqual(dryRun);
+    await expect(
+      new MigrationRunner({
+        store,
+        target,
+        capabilities: async () => ({
+          source: snapshot("provider"),
+          target: snapshot("merchant"),
+        }),
+      }).apply(plan),
+    ).rejects.toBeInstanceOf(MigrationCapabilityDriftError);
+    expect(target.writeCount).toBe(0);
   });
 
   it("recovers an abandoned item only after its lease expires", async () => {

@@ -32,6 +32,10 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
       "customer.create": { ...native, constraints: { requiresEmail: true, requiresName: true } },
       "customer.update": native,
       "customer.portal": native,
+      "subscription.create": unsupportedCapability(
+        "Dodo's standalone subscription endpoint is deprecated and requires billing address data that is not part of the canonical subscription command; checkout-created subscriptions are not a synchronous subscription mutation",
+        ["Create a hosted checkout for the mapped recurring product"],
+      ),
       "subscription.read": native,
       "subscription.cancel": native,
       "subscription.pause": {

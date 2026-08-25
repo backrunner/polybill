@@ -29,6 +29,11 @@
 - Stripe discount create/read/redeem has an offline transport and amount read-back proof.
 - Dodo and Polar canonical checkout discounts remain `unsupported` until external discount IDs and
   final net amount can be proven end to end.
+- Dodo, Polar, Creem, Lemon Squeezy, and Paddle Billing direct `subscription.create` remain
+  `unsupported`. Their documented recurring flows create the subscription after a hosted checkout
+  or paid transaction. Dodo's deprecated direct endpoint additionally requires a billing address,
+  which is outside the canonical command. A future capability requires an explicit asynchronous
+  checkout-to-subscription workflow, provider read-back, and response-loss reconciliation proof.
 - x402 is one-time USDC settlement. Recurring mandate is `unsupported`; any reauthorization workflow
   must create a new PaymentRef each period.
 - Saved payment methods, card mandates and legal MoR responsibility are never marked portable merely

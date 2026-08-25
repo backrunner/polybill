@@ -21,6 +21,10 @@ export function lemonCapabilities(context: ProviderContext): CapabilitySnapshot 
       "customer.read": native,
       "customer.update": native,
       "customer.portal": native,
+      "subscription.create": unsupportedCapability(
+        "Lemon Squeezy creates subscriptions through variant checkout; the API does not expose a standalone subscription create mutation",
+        ["Create a checkout for the mapped recurring variant"],
+      ),
       "subscription.read": native,
       "subscription.pause": {
         ...native,

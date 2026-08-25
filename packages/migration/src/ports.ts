@@ -10,6 +10,7 @@ import type {
   MigrationItemResult,
   MigrationPlan,
   MigrationPlanItem,
+  MigrationReport,
   MigrationVerification,
 } from "./types.js";
 
@@ -70,6 +71,8 @@ export interface MigrationStore {
   completeItem(planId: string, leaseToken: string, result: MigrationItemResult): Promise<void>;
   failItem(planId: string, itemKey: string, leaseToken: string, errorCode: string): Promise<void>;
   listResults(planId: string): Promise<readonly MigrationItemResult[]>;
+  saveReport(report: MigrationReport): Promise<void>;
+  getReport(planId: string): Promise<MigrationReport | undefined>;
   saveCheckpoint(
     planId: string,
     stream: string,

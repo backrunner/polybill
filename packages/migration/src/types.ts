@@ -118,5 +118,6 @@ export interface MigrationReport {
   readonly phase: MigrationPhase;
   readonly totals: Readonly<Record<MigrationItemResult["status"], number>>;
   readonly results: readonly MigrationItemResult[];
+  readonly verifications: readonly MigrationVerification[];
   readonly blockers: readonly MigrationLoss[];
 }

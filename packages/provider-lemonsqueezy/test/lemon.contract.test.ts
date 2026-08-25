@@ -5,6 +5,13 @@ import { describe, expect, it } from "vitest";
 import { createLemonSqueezyAdapter } from "../src/index.js";
 
 describe("Lemon Squeezy webhook contract", () => {
+  it("does not claim synchronous subscription creation", async () => {
+    const capability = (
+      await createLemonSqueezyAdapter().getCapabilities(context(globalThis.fetch))
+    ).capabilities["subscription.create"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("uses raw HMAC and a deterministic digest delivery key", async () => {
     const body =
       '{"meta":{"event_name":"order_created"},"data":{"id":"order_fixture","attributes":{"created_at":"2026-08-25T00:00:00.000Z"}}}';

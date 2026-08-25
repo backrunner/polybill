@@ -11,6 +11,12 @@ describe("Polar webhook contract", () => {
     expect(capability).toMatchObject({ support: "unsupported" });
   });
 
+  it("does not claim synchronous subscription creation", async () => {
+    const capability = (await createPolarAdapter().getCapabilities(context(globalThis.fetch)))
+      .capabilities["subscription.create"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("verifies Standard Webhooks over exact raw bytes", async () => {
     const body = '{"type":"order.paid","data":{"id":"order_fixture"}}';
     const id = "msg_fixture";
