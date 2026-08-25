@@ -56,8 +56,10 @@ async function create(
   });
   const root = object(response.json(), "dodo", "dodo.checkout.decode");
   const url = optionalString(root, "checkout_url");
+  const externalPaymentId = optionalString(root, "payment_id");
   const value: ProviderCheckoutSnapshot = {
     externalId: stringField(root, "session_id", "dodo", "dodo.checkout.decode"),
+    ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
     status: "open",
     ...(url === undefined ? {} : { url }),
     rawStatus: "created",
@@ -68,13 +70,19 @@ async function create(
 function decodeStatus(value: unknown): ProviderCheckoutSnapshot {
   const root = object(value, "dodo", "dodo.checkout.decode");
   const rawStatus = optionalString(root, "payment_status") ?? "collecting_details";
+  const externalPaymentId = optionalString(root, "payment_id");
   const status =
     rawStatus === "succeeded"
       ? "complete"
       : rawStatus === "failed" || rawStatus === "cancelled"
         ? "canceled"
         : "open";
-  return { externalId: stringField(root, "id", "dodo", "dodo.checkout.decode"), status, rawStatus };
+  return {
+    externalId: stringField(root, "id", "dodo", "dodo.checkout.decode"),
+    ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
+    status,
+    rawStatus,
+  };
 }
 
 function result(

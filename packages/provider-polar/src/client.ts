@@ -1,4 +1,5 @@
 import {
+  assertCredentialEnvironment,
   createHttpTransport,
   type HttpResponse,
   type ProviderContext,
@@ -13,6 +14,7 @@ export async function polarRequest(
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {
+  assertCredentialEnvironment(context, "polar.authenticate");
   const token = context.credentials.accessToken;
   if (token === undefined || token.length < 8)
     throw new PolybillError("Polar access token is missing", {

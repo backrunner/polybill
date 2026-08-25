@@ -14,12 +14,15 @@ import {
   type TenantId,
 } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
+import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
 
 export class D1DiscountStore implements DiscountStore {
   readonly #db: D1DatabaseLike;
+  readonly #writes: D1WriteCoordinator;
 
-  constructor(db: D1DatabaseLike) {
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
     this.#db = db;
+    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
   }
 
   async createDiscount(
@@ -80,33 +83,36 @@ export class D1DiscountStore implements DiscountStore {
     if (current === undefined) return { kind: "not_found" };
     const archived: Discount = { ...current, status: "archived" };
     try {
-      const results = await this.#db.batch([
-        this.#db
-          .prepare(
-            "UPDATE polybill_discounts SET status = 'archived', update_token = ?, value = ? WHERE tenant_id = ? AND discount_id = ? AND NOT EXISTS (SELECT 1 FROM polybill_discount_actions WHERE tenant_id = ? AND idempotency_key = ?)",
-          )
-          .bind(
-            input.idempotencyKey,
-            JSON.stringify(archived),
-            input.tenantId,
-            input.discountId,
-            input.tenantId,
-            input.idempotencyKey,
-          ),
-        this.#db
-          .prepare(
-            "INSERT INTO polybill_discount_actions (tenant_id, idempotency_key, payload_hash, value) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_discounts WHERE tenant_id = ? AND discount_id = ? AND update_token = ?)",
-          )
-          .bind(
-            input.tenantId,
-            input.idempotencyKey,
-            input.payloadHash,
-            JSON.stringify(archived),
-            input.tenantId,
-            input.discountId,
-            input.idempotencyKey,
-          ),
-      ]);
+      const results = await this.#writes.execute(
+        [
+          this.#db
+            .prepare(
+              "UPDATE polybill_discounts SET status = 'archived', update_token = ?, value = ? WHERE tenant_id = ? AND discount_id = ? AND NOT EXISTS (SELECT 1 FROM polybill_discount_actions WHERE tenant_id = ? AND idempotency_key = ?)",
+            )
+            .bind(
+              input.idempotencyKey,
+              JSON.stringify(archived),
+              input.tenantId,
+              input.discountId,
+              input.tenantId,
+              input.idempotencyKey,
+            ),
+          this.#db
+            .prepare(
+              "INSERT INTO polybill_discount_actions (tenant_id, idempotency_key, payload_hash, value) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_discounts WHERE tenant_id = ? AND discount_id = ? AND update_token = ?)",
+            )
+            .bind(
+              input.tenantId,
+              input.idempotencyKey,
+              input.payloadHash,
+              JSON.stringify(archived),
+              input.tenantId,
+              input.discountId,
+              input.idempotencyKey,
+            ),
+        ],
+        "discount.archive",
+      );
       if (changes(results[0]) === 1 && changes(results[1]) === 1)
         return { kind: "archived", discount: archived };
     } catch (error) {

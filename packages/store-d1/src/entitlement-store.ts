@@ -9,12 +9,15 @@ import type {
 } from "@polybill/licensing";
 import type { D1DatabaseLike } from "./d1.js";
 import { decodeEntitlementGrant, decodeEntitlementPolicy } from "./licensing-codecs.js";
+import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
 
 export class D1EntitlementStore implements EntitlementStore {
   readonly #db: D1DatabaseLike;
+  readonly #writes: D1WriteCoordinator;
 
-  constructor(db: D1DatabaseLike) {
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
     this.#db = db;
+    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
   }
 
   async createEntitlementPolicy(
@@ -118,36 +121,39 @@ export class D1EntitlementStore implements EntitlementStore {
     };
     const placeholders = input.expectedStatuses.map(() => "?").join(", ");
     try {
-      const results = await this.#db.batch([
-        this.#db
-          .prepare(
-            `UPDATE polybill_entitlement_grants SET status = ?, value = ?, update_token = ? WHERE tenant_id = ? AND grant_id = ? AND status IN (${placeholders}) AND NOT EXISTS (SELECT 1 FROM polybill_entitlement_transitions WHERE tenant_id = ? AND idempotency_key = ?)`,
-          )
-          .bind(
-            input.status,
-            JSON.stringify(updated),
-            input.idempotencyKey,
-            input.tenantId,
-            input.grantId,
-            ...input.expectedStatuses,
-            input.tenantId,
-            input.idempotencyKey,
-          ),
-        this.#db
-          .prepare(
-            "INSERT INTO polybill_entitlement_transitions (tenant_id, idempotency_key, grant_id, payload, value) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_entitlement_grants WHERE tenant_id = ? AND grant_id = ? AND update_token = ?)",
-          )
-          .bind(
-            input.tenantId,
-            input.idempotencyKey,
-            input.grantId,
-            payload,
-            JSON.stringify(updated),
-            input.tenantId,
-            input.grantId,
-            input.idempotencyKey,
-          ),
-      ]);
+      const results = await this.#writes.execute(
+        [
+          this.#db
+            .prepare(
+              `UPDATE polybill_entitlement_grants SET status = ?, value = ?, update_token = ? WHERE tenant_id = ? AND grant_id = ? AND status IN (${placeholders}) AND NOT EXISTS (SELECT 1 FROM polybill_entitlement_transitions WHERE tenant_id = ? AND idempotency_key = ?)`,
+            )
+            .bind(
+              input.status,
+              JSON.stringify(updated),
+              input.idempotencyKey,
+              input.tenantId,
+              input.grantId,
+              ...input.expectedStatuses,
+              input.tenantId,
+              input.idempotencyKey,
+            ),
+          this.#db
+            .prepare(
+              "INSERT INTO polybill_entitlement_transitions (tenant_id, idempotency_key, grant_id, payload, value) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_entitlement_grants WHERE tenant_id = ? AND grant_id = ? AND update_token = ?)",
+            )
+            .bind(
+              input.tenantId,
+              input.idempotencyKey,
+              input.grantId,
+              payload,
+              JSON.stringify(updated),
+              input.tenantId,
+              input.grantId,
+              input.idempotencyKey,
+            ),
+        ],
+        "entitlement.transition",
+      );
       if (changes(results[0]) === 1 && changes(results[1]) === 1)
         return { kind: "changed", grant: updated };
     } catch (error) {

@@ -59,7 +59,10 @@ export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot
         constraints: { onResume: "start_new_billing_period" },
       },
       "subscription.cancel": native,
-      "refund.partial": native,
+      "refund.partial": unsupportedCapability(
+        "Paddle partial refunds require historical adjustment allocation; Polybill cannot safely derive remaining line-item balance from a transaction read alone",
+        ["Use refund.full or reconcile provider adjustments before issuing a partial refund"],
+      ),
       "refund.full": native,
       "webhook.verify": native,
       "license.issue": {

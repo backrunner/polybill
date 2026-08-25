@@ -86,6 +86,7 @@ function encode(command: ProviderCheckoutCommand): URLSearchParams {
 
 function decode(value: unknown): ProviderCheckoutSnapshot {
   const root = object(value, "stripe", "stripe.checkout.decode");
+  const externalPaymentId = optionalString(root, "payment_intent");
   const status = statusOf(optionalString(root, "status"));
   const expires = root.expires_at;
   const url = optionalString(root, "url");
@@ -93,6 +94,7 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const amountTotal = root.amount_total;
   return {
     externalId: stringField(root, "id", "stripe", "stripe.checkout.decode"),
+    ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
     status,
     ...(url === undefined ? {} : { url }),
     ...(typeof expires === "number"

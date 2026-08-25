@@ -13,6 +13,7 @@ import {
 } from "@polybill/core";
 import { requireExternalId } from "./resource-runtime.js";
 import type { ResourceRuntime } from "./resource-runtime.js";
+import type { ResourceCommit } from "./ports.js";
 
 export interface CreateRefundCommand {
   readonly idempotencyKey: IdempotencyKey;
@@ -92,18 +93,23 @@ export class RefundService {
           status: remote.value.status,
           evidence: [],
         };
-        await this.#runtime.options.store.commitResource({
-          tenantId: this.#runtime.options.tenantId,
-          connectionId: this.#runtime.options.connection.id,
-          provider: this.#runtime.options.connection.provider,
-          entityType: "refund",
-          entityId: refund.id,
-          externalId: remote.value.externalId,
-          value: refund,
-          evidence: remote.evidence,
-          occurredAt: this.#runtime.options.clock.now(),
-        });
-        await this.#projectPayment(payment, undefined, refund, remote.evidence);
+        const commits: ResourceCommit[] = [
+          {
+            tenantId: this.#runtime.options.tenantId,
+            connectionId: this.#runtime.options.connection.id,
+            provider: this.#runtime.options.connection.provider,
+            entityType: "refund",
+            entityId: refund.id,
+            externalId: remote.value.externalId,
+            value: refund,
+            evidence: remote.evidence,
+            occurredAt: this.#runtime.options.clock.now(),
+          },
+        ];
+        commits.push(
+          ...(await this.#projectPaymentCommits(payment, undefined, refund, remote.evidence)),
+        );
+        await this.#commitAfterRemote(commits, "refund.commit");
         return refund;
       },
     });
@@ -166,58 +172,69 @@ export class RefundService {
           amount: remote.value.amount,
           status: remote.value.status,
         };
-        await this.#runtime.options.store.commitResource({
-          tenantId: this.#runtime.options.tenantId,
-          connectionId: this.#runtime.options.connection.id,
-          provider: this.#runtime.options.connection.provider,
-          entityType: "refund",
-          entityId: id,
-          externalId,
-          value: refund,
-          evidence: remote.evidence,
-          occurredAt: this.#runtime.options.clock.now(),
-        });
-        await this.#projectPayment(payment, current, refund, remote.evidence);
+        const commits: ResourceCommit[] = [
+          {
+            tenantId: this.#runtime.options.tenantId,
+            connectionId: this.#runtime.options.connection.id,
+            provider: this.#runtime.options.connection.provider,
+            entityType: "refund",
+            entityId: id,
+            externalId,
+            value: refund,
+            evidence: remote.evidence,
+            occurredAt: this.#runtime.options.clock.now(),
+          },
+        ];
+        commits.push(
+          ...(await this.#projectPaymentCommits(payment, current, refund, remote.evidence)),
+        );
+        await this.#commitAfterRemote(commits, "refund.refresh.commit");
         return refund;
       },
     });
   }
 
-  async #projectPayment(
+  async #projectPaymentCommits(
     payment: Payment,
     previous: Refund | undefined,
     next: Refund,
     evidence: unknown,
-  ): Promise<void> {
+  ): Promise<readonly ResourceCommit[]> {
     const before = previous?.status === "succeeded" ? previous.amount : moneyZero(payment.amount);
     const after = next.status === "succeeded" ? next.amount : moneyZero(payment.amount);
     const base = subtractMoney(payment.refundedAmount, before);
     const refundedAmount = addMoney(base, after);
     const projected: Payment = { ...payment, refundedAmount };
-    await this.#runtime.options.store.commitResource({
-      tenantId: this.#runtime.options.tenantId,
-      connectionId: this.#runtime.options.connection.id,
-      provider: this.#runtime.options.connection.provider,
-      entityType: "payment",
-      entityId: payment.id,
-      value: projected,
-      evidence,
-      occurredAt: this.#runtime.options.clock.now(),
-    });
+    const commits: ResourceCommit[] = [
+      {
+        tenantId: this.#runtime.options.tenantId,
+        connectionId: this.#runtime.options.connection.id,
+        provider: this.#runtime.options.connection.provider,
+        entityType: "payment",
+        entityId: payment.id,
+        value: projected,
+        evidence,
+        occurredAt: this.#runtime.options.clock.now(),
+      },
+    ];
     const order = await this.#runtime.options.store.getResource<Order>(
       this.#runtime.options.tenantId,
       "order",
       payment.orderId,
     );
-    if (order === undefined) return;
+    if (order === undefined) {
+      return commits;
+    }
     const paymentStatus =
       compareMoney(refundedAmount, payment.amount) === 0
         ? "refunded"
         : compareMoney(refundedAmount, moneyZero(payment.amount)) > 0
           ? "partially_refunded"
           : order.paymentStatus;
-    if (paymentStatus === order.paymentStatus) return;
-    await this.#runtime.options.store.commitResource({
+    if (paymentStatus === order.paymentStatus) {
+      return commits;
+    }
+    commits.push({
       tenantId: this.#runtime.options.tenantId,
       connectionId: this.#runtime.options.connection.id,
       provider: this.#runtime.options.connection.provider,
@@ -227,6 +244,22 @@ export class RefundService {
       evidence,
       occurredAt: this.#runtime.options.clock.now(),
     });
+    return commits;
+  }
+
+  async #commitAfterRemote(commits: readonly ResourceCommit[], operation: string): Promise<void> {
+    try {
+      await this.#runtime.options.store.commitResources(commits);
+    } catch (cause) {
+      throw new PolybillError("Refund was accepted but canonical persistence failed", {
+        code: "outcome_unknown",
+        operation,
+        provider: this.#runtime.options.connection.provider,
+        connectionId: this.#runtime.options.connection.id,
+        retryable: true,
+        cause,
+      });
+    }
   }
 }
 

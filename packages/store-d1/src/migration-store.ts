@@ -8,6 +8,7 @@ import type {
 } from "@polybill/migration";
 import type { TenantId } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
+import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
 
 interface ItemStateRow {
   readonly state: "pending" | "processing" | "completed" | "failed";
@@ -17,6 +18,7 @@ export interface D1MigrationStoreOptions {
   readonly now?: () => number;
   readonly leaseToken?: () => string;
   readonly leaseMs?: number;
+  readonly writes?: D1WriteCoordinator;
 }
 
 export class D1MigrationStore implements MigrationStore {
@@ -25,6 +27,7 @@ export class D1MigrationStore implements MigrationStore {
   readonly #now: () => number;
   readonly #leaseToken: () => string;
   readonly #leaseMs: number;
+  readonly #writes: D1WriteCoordinator;
 
   constructor(db: D1DatabaseLike, tenantId: TenantId, options: D1MigrationStoreOptions = {}) {
     this.#db = db;
@@ -32,25 +35,29 @@ export class D1MigrationStore implements MigrationStore {
     this.#now = options.now ?? Date.now;
     this.#leaseToken = options.leaseToken ?? (() => globalThis.crypto.randomUUID());
     this.#leaseMs = options.leaseMs ?? 60_000;
+    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
   }
 
   async savePlan(plan: MigrationPlan): Promise<void> {
     if (plan.tenantId !== this.#tenantId)
       throw new Error("Migration plan tenant does not match store");
-    await this.#db.batch([
-      this.#db
-        .prepare(
-          `INSERT INTO polybill_migration_plans (tenant_id, plan_id, mode, state, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT(tenant_id, plan_id) DO UPDATE SET mode = excluded.mode, state = excluded.state, value = excluded.value`,
-        )
-        .bind(this.#tenantId, plan.id, plan.mode, plan.phase, JSON.stringify(plan)),
-      ...plan.items.map((item) =>
+    await this.#writes.execute(
+      [
         this.#db
           .prepare(
-            `INSERT INTO polybill_migration_items (tenant_id, plan_id, item_key, state, value) VALUES (?, ?, ?, 'pending', ?) ON CONFLICT(tenant_id, plan_id, item_key) DO NOTHING`,
+            `INSERT INTO polybill_migration_plans (tenant_id, plan_id, mode, state, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT(tenant_id, plan_id) DO UPDATE SET mode = excluded.mode, state = excluded.state, value = excluded.value`,
           )
-          .bind(this.#tenantId, plan.id, item.key, JSON.stringify(item)),
-      ),
-    ]);
+          .bind(this.#tenantId, plan.id, plan.mode, plan.phase, JSON.stringify(plan)),
+        ...plan.items.map((item) =>
+          this.#db
+            .prepare(
+              `INSERT INTO polybill_migration_items (tenant_id, plan_id, item_key, state, value) VALUES (?, ?, ?, 'pending', ?) ON CONFLICT(tenant_id, plan_id, item_key) DO NOTHING`,
+            )
+            .bind(this.#tenantId, plan.id, item.key, JSON.stringify(item)),
+        ),
+      ],
+      "migration.save_plan",
+    );
   }
 
   async getPlan(planId: string): Promise<MigrationPlan | undefined> {

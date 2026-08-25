@@ -100,7 +100,11 @@ export class AdHocCheckoutService {
       remoteObserved = true;
       return await this.#commit(scope, claim.leaseToken, prepared, remote);
     } catch (error) {
-      if ((error instanceof PolybillError && error.code === "outcome_unknown") || remoteObserved) {
+      if (
+        (error instanceof PolybillError &&
+          (error.code === "outcome_unknown" || error.code === "provider_unavailable")) ||
+        remoteObserved
+      ) {
         if (claim.kind === "claimed")
           await this.#options.store.markUnknown(
             scope,
@@ -217,6 +221,9 @@ export class AdHocCheckoutService {
       connectionId: this.#options.connection.id,
       provider: this.#options.connection.provider,
       externalCheckoutId: remote.value.externalId,
+      ...(remote.value.externalPaymentId === undefined
+        ? {}
+        : { externalPaymentId: remote.value.externalPaymentId }),
       checkout: result.checkout,
       order,
       payment: result.payment,

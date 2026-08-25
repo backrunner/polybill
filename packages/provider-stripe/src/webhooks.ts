@@ -3,6 +3,7 @@ import {
   canonicalWebhookEvent,
   joinBytes,
   object,
+  optionalString,
   signatureError,
   stringField,
   utf8,
@@ -44,12 +45,14 @@ export const stripeWebhooks: WebhookProvider = {
     const root = decodeRoot(event.rawBody);
     const data = object(root.data, "stripe", "stripe.webhook.decode");
     const payload = object(data.object, "stripe", "stripe.webhook.decode");
+    const paymentIntent = optionalString(payload, "payment_intent");
     const created = root.created;
     return {
       type: stringField(root, "type", "stripe", "stripe.webhook.decode"),
       externalIds: {
         event: stringField(root, "id", "stripe", "stripe.webhook.decode"),
         object: stringField(payload, "id", "stripe", "stripe.webhook.decode"),
+        ...(paymentIntent === undefined ? {} : { payment: paymentIntent }),
       },
       ...(typeof created === "number"
         ? { occurredAt: parseIsoDateTime(new Date(created * 1000).toISOString()) }
@@ -59,8 +62,21 @@ export const stripeWebhooks: WebhookProvider = {
   },
   async map(event, context) {
     const mapping = eventMapping(event.type);
-    const externalId = event.externalIds.object;
-    if (mapping === undefined || externalId === undefined)
+    if (mapping === undefined)
+      return [
+        await canonicalWebhookEvent({
+          event,
+          context,
+          type: "unmapped_provider_event.v1",
+          aggregateType: "connection",
+          aggregateId: context.connection.id,
+        }),
+      ];
+    const externalId =
+      mapping.aggregate === "payment"
+        ? (event.externalIds.payment ?? event.externalIds.object)
+        : event.externalIds.object;
+    if (externalId === undefined)
       return [
         await canonicalWebhookEvent({
           event,
@@ -116,6 +132,12 @@ function eventMapping(
     "checkout.session.expired": { type: "checkout.expired.v1", aggregate: "checkout" },
     "payment_intent.succeeded": { type: "payment.succeeded.v1", aggregate: "payment" },
     "payment_intent.payment_failed": { type: "payment.failed.v1", aggregate: "payment" },
+    "payment_intent.processing": { type: "payment.processing.v1", aggregate: "payment" },
+    "payment_intent.requires_action": {
+      type: "payment.action_required.v1",
+      aggregate: "payment",
+    },
+    "payment_intent.canceled": { type: "payment.canceled.v1", aggregate: "payment" },
     "customer.subscription.created": { type: "subscription.created.v1", aggregate: "subscription" },
     "customer.subscription.updated": { type: "subscription.changed.v1", aggregate: "subscription" },
     "customer.subscription.deleted": {

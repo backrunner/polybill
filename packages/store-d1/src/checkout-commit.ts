@@ -1,20 +1,28 @@
 import type { CheckoutCommit } from "@polybill/application";
 import type { TenantId } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
+import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+
+export interface CheckoutCommitOptions {
+  readonly writes?: D1WriteCoordinator;
+}
 
 export async function commitCheckoutToD1(
   db: D1DatabaseLike,
   commit: CheckoutCommit,
+  options: CheckoutCommitOptions = {},
 ): Promise<void> {
+  const writes = options.writes ?? new DefaultD1WriteCoordinator(db);
   const existing = await checkoutCommitState(db, commit);
   if (existing === "same") return;
   if (existing === "conflict")
     throw new Error("Checkout already exists with different canonical data");
   try {
-    const results = await db.batch(
+    const results = await writes.execute(
       commit.discountReservationId === undefined
         ? standardStatements(db, commit)
         : discountedStatements(db, commit),
+      "checkout.commit",
     );
     if (
       commit.discountReservationId !== undefined &&
@@ -31,12 +39,13 @@ function standardStatements(db: D1DatabaseLike, commit: CheckoutCommit) {
   return [
     db
       .prepare(
-        "INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, 'checkout', ?, ?, 1, 'created')",
+        "INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, 'checkout', ?, ?, 1, 'created') ON CONFLICT(tenant_id, connection_id, entity_type, entity_id) DO NOTHING",
       )
       .bind(commit.tenantId, commit.connectionId, commit.checkout.id, commit.externalCheckoutId),
     snapshotStatement(db, commit, "checkout", commit.checkout.id, commit.checkout),
     snapshotStatement(db, commit, "order", commit.order.id, commit.order),
     snapshotStatement(db, commit, "payment", commit.payment.id, commit.payment),
+    ...(commit.externalPaymentId === undefined ? [] : [paymentMappingStatement(db, commit)]),
     auditStatement(db, commit),
   ];
 }
@@ -78,6 +87,9 @@ function discountedStatements(db: D1DatabaseLike, commit: CheckoutCommit) {
     guardedSnapshot(db, commit, "checkout", commit.checkout.id, commit.checkout, reservationId),
     guardedSnapshot(db, commit, "order", commit.order.id, commit.order, reservationId),
     guardedSnapshot(db, commit, "payment", commit.payment.id, commit.payment, reservationId),
+    ...(commit.externalPaymentId === undefined
+      ? []
+      : [guardedPaymentMappingStatement(db, commit, reservationId)]),
     db
       .prepare(
         `INSERT INTO polybill_audit (tenant_id, operation, evidence, occurred_at) SELECT ?, 'checkout.commit', ?, ? WHERE ${guard}`,
@@ -93,6 +105,36 @@ function discountedStatements(db: D1DatabaseLike, commit: CheckoutCommit) {
   ];
 }
 
+function paymentMappingStatement(db: D1DatabaseLike, commit: CheckoutCommit) {
+  return db
+    .prepare(
+      "INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, 'payment', ?, ?, 1, 'created') ON CONFLICT(tenant_id, connection_id, entity_type, entity_id) DO NOTHING",
+    )
+    .bind(commit.tenantId, commit.connectionId, commit.payment.id, commit.externalPaymentId);
+}
+
+function guardedPaymentMappingStatement(
+  db: D1DatabaseLike,
+  commit: CheckoutCommit,
+  reservationId: string,
+) {
+  const guard =
+    "EXISTS (SELECT 1 FROM polybill_discount_redemptions WHERE tenant_id = ? AND redemption_id = ? AND status = 'finalized' AND order_id = ?)";
+  return db
+    .prepare(
+      `INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) SELECT ?, ?, 'payment', ?, ?, 1, 'created' WHERE ${guard}`,
+    )
+    .bind(
+      commit.tenantId,
+      commit.connectionId,
+      commit.payment.id,
+      commit.externalPaymentId,
+      commit.tenantId,
+      reservationId,
+      commit.order.id,
+    );
+}
+
 function snapshotStatement(
   db: D1DatabaseLike,
   commit: CheckoutCommit,
@@ -102,7 +144,7 @@ function snapshotStatement(
 ) {
   return db
     .prepare(
-      "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, ?, ?, 1, ?, ?)",
+      "INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(tenant_id, aggregate_type, aggregate_id) DO NOTHING",
     )
     .bind(commit.tenantId, type, id, commit.occurredAt, JSON.stringify(value));
 }
@@ -151,13 +193,21 @@ async function checkoutCommitState(
   db: D1DatabaseLike,
   commit: CheckoutCommit,
 ): Promise<"empty" | "same" | "conflict"> {
-  const [mapping, checkout, order, payment, reservation] = await Promise.all([
+  const [mapping, paymentMapping, checkout, order, payment, reservation] = await Promise.all([
     db
       .prepare(
         "SELECT external_id FROM polybill_mappings WHERE tenant_id = ? AND connection_id = ? AND entity_type = 'checkout' AND entity_id = ?",
       )
       .bind(commit.tenantId, commit.connectionId, commit.checkout.id)
       .first<{ external_id: string }>(),
+    commit.externalPaymentId === undefined
+      ? Promise.resolve(null)
+      : db
+          .prepare(
+            "SELECT external_id FROM polybill_mappings WHERE tenant_id = ? AND connection_id = ? AND entity_type = 'payment' AND entity_id = ?",
+          )
+          .bind(commit.tenantId, commit.connectionId, commit.payment.id)
+          .first<{ external_id: string }>(),
     snapshot(db, commit.tenantId, "checkout", commit.checkout.id),
     snapshot(db, commit.tenantId, "order", commit.order.id),
     snapshot(db, commit.tenantId, "payment", commit.payment.id),
@@ -170,7 +220,13 @@ async function checkoutCommitState(
           .bind(commit.tenantId, commit.discountReservationId)
           .first<{ status: string; order_id: string | null }>(),
   ]);
-  if (mapping === null && checkout === null && order === null && payment === null)
+  if (
+    mapping === null &&
+    paymentMapping === null &&
+    checkout === null &&
+    order === null &&
+    payment === null
+  )
     return reservation?.status === "finalized" ? "conflict" : "empty";
   const reservationMatches =
     commit.discountReservationId === undefined ||
@@ -178,6 +234,8 @@ async function checkoutCommitState(
       reservation.order_id === commit.order.id &&
       commit.order.discounts.length === 1);
   return mapping?.external_id === commit.externalCheckoutId &&
+    (commit.externalPaymentId === undefined ||
+      paymentMapping?.external_id === commit.externalPaymentId) &&
     checkout === JSON.stringify(commit.checkout) &&
     order === JSON.stringify(commit.order) &&
     payment === JSON.stringify(commit.payment) &&

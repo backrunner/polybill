@@ -1,4 +1,5 @@
 import {
+  assertCredentialEnvironment,
   createHttpTransport,
   type HttpResponse,
   type ProviderContext,
@@ -13,6 +14,7 @@ export async function lemonRequest(
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {
+  assertCredentialEnvironment(context, "lemonSqueezy.authenticate");
   const apiKey = context.credentials.apiKey;
   if (apiKey === undefined || apiKey.length < 8)
     throw new PolybillError("Lemon Squeezy API key is missing", {
@@ -31,6 +33,9 @@ export async function lemonRequest(
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/vnd.api+json",
+      ...(context.idempotencyKey === undefined
+        ? {}
+        : { "Idempotency-Key": context.idempotencyKey }),
       ...(body === undefined ? {} : { "Content-Type": "application/vnd.api+json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

@@ -70,6 +70,7 @@ async function create(
 
 function decode(value: unknown): ProviderCheckoutSnapshot {
   const root = object(value, "polar", "polar.checkout.decode");
+  const externalPaymentId = optionalString(root, "payment_id");
   const rawStatus = optionalString(root, "status") ?? "unknown";
   const status =
     rawStatus === "succeeded"
@@ -85,6 +86,7 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const expiresAt = optionalString(root, "expires_at");
   return {
     externalId: stringField(root, "id", "polar", "polar.checkout.decode"),
+    ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
     status,
     ...(url === undefined ? {} : { url }),
     ...(expiresAt === undefined ? {} : { expiresAt: parseIsoDateTime(expiresAt) }),

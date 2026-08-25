@@ -107,6 +107,7 @@ export interface ResourceCommit {
 
 export interface CanonicalResourceStore {
   commitResource(commit: ResourceCommit): Promise<void>;
+  commitResources(commits: readonly ResourceCommit[]): Promise<void>;
   getResource<T>(tenantId: TenantId, entityType: string, entityId: string): Promise<T | undefined>;
 }
 
@@ -115,6 +116,7 @@ export interface CheckoutCommit {
   readonly connectionId: ConnectionId;
   readonly provider: ProviderName;
   readonly externalCheckoutId: string;
+  readonly externalPaymentId?: string;
   readonly checkout: CheckoutSession;
   readonly order: Order;
   readonly payment: Payment;

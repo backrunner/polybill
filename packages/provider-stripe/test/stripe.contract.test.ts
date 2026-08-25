@@ -218,6 +218,35 @@ describe("Stripe adapter contract", () => {
     expect(mapped[0]?.type).toBe("unmapped_provider_event.v1");
   });
 
+  it("leaves dispute events unmapped until a canonical dispute model exists", async () => {
+    const adapter = createStripeAdapter();
+    const rawBody = new TextEncoder().encode(
+      JSON.stringify({
+        id: "evt_dispute_fixture",
+        type: "charge.dispute.created",
+        created: 1756080000,
+        data: { object: { id: "dp_fixture", payment_intent: "pi_fixture" } },
+      }),
+    );
+    const decoded = adapter.webhooks.decode({
+      provider: "stripe",
+      environment: "test",
+      deliveryKey: "stripe:evt_dispute_fixture",
+      providerEventId: "evt_dispute_fixture",
+      rawBody,
+      verifiedAt: parseIsoDateTime("2025-08-25T00:00:00.000Z"),
+    });
+    const mapped = await adapter.webhooks.map(decoded, {
+      tenantId,
+      connection,
+      observedAt: parseIsoDateTime("2025-08-25T00:00:00.000Z"),
+      lookup: {
+        findCanonicalId: async () => undefined,
+      },
+    });
+    expect(mapped[0]?.type).toBe("unmapped_provider_event.v1");
+  });
+
   it("rejects timestamp replay and environment-mismatched credentials", async () => {
     const adapter = createStripeAdapter();
     const body = new TextEncoder().encode('{"id":"evt_123"}');

@@ -33,6 +33,9 @@ export async function paddleRequest(
       Authorization: `Bearer ${apiKey}`,
       "Paddle-Version": PADDLE_API_VERSION,
       Accept: "application/json",
+      ...(context.idempotencyKey === undefined
+        ? {}
+        : { "Idempotency-Key": context.idempotencyKey }),
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

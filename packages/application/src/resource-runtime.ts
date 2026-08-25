@@ -101,7 +101,10 @@ export class ResourceRuntime {
       await this.options.store.complete(scope, claim.leaseToken, result);
       return result;
     } catch (error) {
-      if (error instanceof PolybillError && error.code === "outcome_unknown")
+      if (
+        error instanceof PolybillError &&
+        (error.code === "outcome_unknown" || error.code === "provider_unavailable")
+      )
         await this.options.store.markUnknown(scope, claim.leaseToken, error.evidenceRef);
       else await this.options.store.release(scope, claim.leaseToken);
       throw error;

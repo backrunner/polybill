@@ -216,6 +216,13 @@ Cloudflare 默认实现使用 D1 保存 control plane、Queue 处理 outbox、Du
 条件更新处理高竞争 redemption。KV 只能缓存 capability、public catalog 和短期读取结果，
 不能作为支付幂等或单次兑换真源。
 
+多语句写入通过 `@polybill/store-d1` 的 `D1WriteCoordinator` 防腐层执行。默认使用 D1
+`batch`；不具备事务批处理能力的部署可注入 `mode: "sequential"`。顺序模式要求 SQL
+具备幂等键和确定性顺序，部分失败会抛出 `d1_write_partial_failure`（包含已完成语句数），
+由上层重试或对账收敛。业务代码不得直接调用 `D1DatabaseLike.batch`。退款快照、支付退款
+累计额和订单支付状态必须作为一个 `commitResources` 资源组提交；顺序模式下每条语句仍需
+可重放，不能把先写退款、后写支付的半套账务当成成功。
+
 ## 9. Event architecture
 
 事件有三层：

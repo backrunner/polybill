@@ -11,6 +11,12 @@ describe("Paddle Billing webhook contract", () => {
     expect(capability).toMatchObject({ support: "unsupported" });
   });
 
+  it("does not claim safe partial refunds without adjustment history", async () => {
+    const capability = (await createPaddleAdapter().getCapabilities(context(globalThis.fetch)))
+      .capabilities["refund.partial"];
+    expect(capability).toMatchObject({ support: "unsupported" });
+  });
+
   it("verifies timestamp and raw body using the Billing signature format", async () => {
     const body =
       '{"event_id":"evt_fixture","event_type":"transaction.completed","occurred_at":"2025-08-25T00:00:00.000Z","data":{"id":"txn_fixture"}}';

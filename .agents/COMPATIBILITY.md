@@ -38,6 +38,17 @@
   must create a new PaymentRef each period.
 - Saved payment methods, card mandates and legal MoR responsibility are never marked portable merely
   because checkout creation works.
+- Refund projections are ledger-based: a provider response must match the requested currency and
+  amount and cannot increase the canonical refunded balance beyond the payment. Paddle Billing
+  `refund.partial` is intentionally `unsupported` until historical adjustment allocation can be
+  read authoritatively; callers must use full refunds or reconcile first.
+- Stripe payment-intent processing, action-required, canceled, and failed events are mapped to
+  explicit payment lifecycle events. Stripe dispute events remain `unmapped_provider_event.v1`
+  because the canonical Dispute aggregate and store contract are not yet implemented; they are
+  retained as verified inbox/audit evidence and never silently treated as refunds or failures.
+- Waffo checkout has no authoritative session read-back. Its adapter therefore does not advertise
+  idempotency-key recovery; an outcome-unknown result remains unknown until an external/provider
+  reconciliation workflow can establish the session.
 
 ## Promotion checklist
 

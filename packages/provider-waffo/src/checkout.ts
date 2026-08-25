@@ -24,9 +24,6 @@ export const waffoCheckout: CheckoutProvider = {
       retryable: false,
     });
   },
-  async recoverByIdempotencyKey(context, _key, command) {
-    return create(context, command);
-  },
 };
 
 async function create(

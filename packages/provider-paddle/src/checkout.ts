@@ -88,6 +88,7 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const url = checkout === undefined ? undefined : optionalString(checkout, "url");
   return {
     externalId: stringField(data, "id", "paddle", "paddle.transaction.decode"),
+    externalPaymentId: stringField(data, "id", "paddle", "paddle.transaction.decode"),
     status,
     ...(url === undefined ? {} : { url }),
     rawStatus,

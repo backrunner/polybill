@@ -39,6 +39,9 @@ export async function commitRemoteCheckout(
     connectionId: options.connection.id,
     provider: options.connection.provider,
     externalCheckoutId: remote.value.externalId,
+    ...(remote.value.externalPaymentId === undefined
+      ? {}
+      : { externalPaymentId: remote.value.externalPaymentId }),
     checkout: result.checkout,
     order: result.order,
     payment: result.payment,

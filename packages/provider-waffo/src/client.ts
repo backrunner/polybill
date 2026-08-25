@@ -1,4 +1,5 @@
 import {
+  assertCredentialEnvironment,
   createHttpTransport,
   sha256Base64,
   signRsaSha256,
@@ -15,6 +16,7 @@ export async function waffoRequest(
   path: string,
   body: unknown,
 ): Promise<HttpResponse> {
+  assertCredentialEnvironment(context, "waffo.authenticate");
   const merchantId = context.credentials.merchantId;
   const privateKey = context.credentials.privateKey;
   if (merchantId === undefined || privateKey === undefined)

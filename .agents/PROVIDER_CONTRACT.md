@@ -97,6 +97,11 @@ webhook.verify/replay/simulate
 migration.catalog/customer/subscription/payment_method
 ```
 
+`dispute.read` remains explicitly unsupported until a canonical Dispute aggregate, mapping, and
+reconciliation port exist. Provider dispute webhooks must be retained as verified raw evidence and
+reported as `unmapped_provider_event.v1`; they must not be coerced into payment failure or refund
+events.
+
 Capability value（与架构中的 descriptor 同源，实际代码只保留一份定义）：
 
 ```ts

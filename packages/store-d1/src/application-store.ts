@@ -24,6 +24,7 @@ import { decodeCheckout, decodePrice, parseStored } from "./application-codecs.j
 import { commitCheckoutToD1 } from "./checkout-commit.js";
 import { D1DiscountRedemptionStore } from "./discount-redemption-store.js";
 import { D1DiscountStore } from "./discount-store.js";
+import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
 
 interface IdempotencyRow {
   readonly payload_hash: string;
@@ -36,6 +37,7 @@ interface IdempotencyRow {
 
 export interface D1ApplicationStoreOptions {
   readonly leaseToken?: () => string;
+  readonly writes?: D1WriteCoordinator;
 }
 
 export class D1ApplicationStore implements ApplicationStore {
@@ -43,11 +45,13 @@ export class D1ApplicationStore implements ApplicationStore {
   readonly #leaseToken: () => string;
   readonly #discounts: D1DiscountStore;
   readonly #discountRedemptions: D1DiscountRedemptionStore;
+  readonly #writes: D1WriteCoordinator;
 
   constructor(db: D1DatabaseLike, options: D1ApplicationStoreOptions = {}) {
     this.#db = db;
+    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
     this.#leaseToken = options.leaseToken ?? (() => `lease_${globalThis.crypto.randomUUID()}`);
-    this.#discounts = new D1DiscountStore(db);
+    this.#discounts = new D1DiscountStore(db, { writes: this.#writes });
     this.#discountRedemptions = new D1DiscountRedemptionStore(db);
   }
 
@@ -205,13 +209,18 @@ export class D1ApplicationStore implements ApplicationStore {
   }
 
   async commitResource(commit: ResourceCommit): Promise<void> {
-    const statements = [
+    return this.commitResources([commit]);
+  }
+
+  async commitResources(commits: readonly ResourceCommit[]): Promise<void> {
+    if (commits.length === 0) return;
+    const statements = commits.flatMap((commit) => [
       ...(commit.externalId === undefined
         ? []
         : [
             this.#db
               .prepare(
-                `INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, ?, ?, ?, 1, 'created') ON CONFLICT(tenant_id, connection_id, entity_type, entity_id) DO UPDATE SET external_id = excluded.external_id, mapping_version = polybill_mappings.mapping_version + 1 WHERE polybill_mappings.external_id = excluded.external_id`,
+                `INSERT INTO polybill_mappings (tenant_id, connection_id, entity_type, entity_id, external_id, mapping_version, source) VALUES (?, ?, ?, ?, ?, 1, 'created') ON CONFLICT(tenant_id, connection_id, entity_type, entity_id) DO NOTHING`,
               )
               .bind(
                 commit.tenantId,
@@ -223,7 +232,7 @@ export class D1ApplicationStore implements ApplicationStore {
           ]),
       this.#db
         .prepare(
-          `INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(tenant_id, aggregate_type, aggregate_id) DO UPDATE SET version = polybill_snapshots.version + 1, observed_at = excluded.observed_at, snapshot = excluded.snapshot`,
+          `INSERT INTO polybill_snapshots (tenant_id, aggregate_type, aggregate_id, version, observed_at, snapshot) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(tenant_id, aggregate_type, aggregate_id) DO UPDATE SET version = polybill_snapshots.version + 1, observed_at = excluded.observed_at, snapshot = excluded.snapshot WHERE polybill_snapshots.snapshot <> excluded.snapshot`,
         )
         .bind(
           commit.tenantId,
@@ -234,16 +243,20 @@ export class D1ApplicationStore implements ApplicationStore {
         ),
       this.#db
         .prepare(
-          "INSERT INTO polybill_audit (tenant_id, operation, evidence, occurred_at) VALUES (?, ?, ?, ?)",
+          "INSERT INTO polybill_audit (tenant_id, operation, evidence, occurred_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM polybill_audit WHERE tenant_id = ? AND operation = ? AND evidence = ? AND occurred_at = ?)",
         )
         .bind(
           commit.tenantId,
           `${commit.entityType}.commit`,
           JSON.stringify({ provider: commit.provider, value: commit.evidence ?? null }),
           commit.occurredAt,
+          commit.tenantId,
+          `${commit.entityType}.commit`,
+          JSON.stringify({ provider: commit.provider, value: commit.evidence ?? null }),
+          commit.occurredAt,
         ),
-    ];
-    await this.#db.batch(statements);
+    ]);
+    await this.#writes.execute(statements, "resource.commit");
   }
 
   async listReconciliationTargets(input: {
@@ -333,7 +346,7 @@ export class D1ApplicationStore implements ApplicationStore {
   }
 
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
-    await commitCheckoutToD1(this.#db, commit);
+    await commitCheckoutToD1(this.#db, commit, { writes: this.#writes });
   }
 
   async getCheckout(tenantId: TenantId, checkoutId: string): Promise<CheckoutSession | undefined> {

@@ -1,4 +1,5 @@
 export * from "./capabilities.js";
+export * from "./credentials.js";
 export * from "./canonical-events.js";
 export * from "./codecs.js";
 export * from "./context.js";

@@ -177,7 +177,11 @@ export class CheckoutService {
       remoteObserved = true;
       return await commitRemoteCheckout(this.#options, scope, claim.leaseToken, prepared, remote);
     } catch (error) {
-      if ((error instanceof PolybillError && error.code === "outcome_unknown") || remoteObserved) {
+      if (
+        (error instanceof PolybillError &&
+          (error.code === "outcome_unknown" || error.code === "provider_unavailable")) ||
+        remoteObserved
+      ) {
         if (claim.kind === "claimed")
           await this.#options.store.markUnknown(
             scope,

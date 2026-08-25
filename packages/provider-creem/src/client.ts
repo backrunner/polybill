@@ -1,4 +1,5 @@
 import {
+  assertCredentialEnvironment,
   createHttpTransport,
   type HttpResponse,
   type ProviderContext,
@@ -13,6 +14,7 @@ export async function creemRequest(
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {
+  assertCredentialEnvironment(context, "creem.authenticate");
   const apiKey = context.credentials.apiKey;
   if (apiKey === undefined || apiKey.length < 8)
     throw new PolybillError("Creem API key is missing", {

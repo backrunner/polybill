@@ -79,6 +79,8 @@ export interface ProviderCheckoutCommand {
 
 export interface ProviderCheckoutSnapshot {
   readonly externalId: string;
+  /** Provider payment/transaction identifier when available at checkout creation/read-back. */
+  readonly externalPaymentId?: string;
   readonly status: "open" | "complete" | "expired" | "canceled" | "unknown";
   readonly url?: string;
   readonly expiresAt?: IsoDateTime;

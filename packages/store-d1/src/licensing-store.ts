@@ -22,13 +22,16 @@ import {
 import { consumeVoucher, validateVoucher } from "./voucher-logic.js";
 import { D1EntitlementStore } from "./entitlement-store.js";
 import { changes, type LicenseInstanceRow, type VoucherRow } from "./licensing-rows.js";
+import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
 
 export class D1LicensingStore extends D1EntitlementStore implements LicensingStore {
   readonly #db: D1DatabaseLike;
+  readonly #writes: D1WriteCoordinator;
 
-  constructor(db: D1DatabaseLike) {
-    super(db);
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
+    super(db, options);
     this.#db = db;
+    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
   }
 
   async issueLicense(
@@ -209,7 +212,7 @@ export class D1LicensingStore extends D1EntitlementStore implements LicensingSto
       ),
     ];
     try {
-      await this.#db.batch(statements);
+      await this.#writes.execute(statements, "license.redeem");
       return { kind: "created", batch, vouchers };
     } catch (error) {
       const raced = await this.#voucherBatchByIssuance(batch.tenantId, issuanceKey);
@@ -251,42 +254,45 @@ export class D1LicensingStore extends D1EntitlementStore implements LicensingSto
     if (denied !== undefined) return { kind: denied };
     const updated = consumeVoucher(voucher, input.redemption.value);
     const redemption: VoucherRedemption = { ...input.redemption, voucherId: voucher.id };
-    const results = await this.#db.batch([
-      this.#db
-        .prepare(
-          `UPDATE polybill_vouchers SET status = ?, remaining_uses = ?, remaining_amount = ?, remaining_currency = ?, value = ?, update_token = ? WHERE tenant_id = ? AND voucher_id = ? AND status = ? AND remaining_uses = ? AND COALESCE(remaining_amount, '') = COALESCE(?, '') AND NOT EXISTS (SELECT 1 FROM polybill_voucher_redemptions WHERE tenant_id = ? AND idempotency_key = ?)`,
-        )
-        .bind(
-          updated.status,
-          updated.remainingUses,
-          updated.remainingValue?.amount ?? null,
-          updated.remainingValue?.currency ?? null,
-          JSON.stringify(updated),
-          input.redemption.idempotencyKey,
-          input.tenantId,
-          voucher.id,
-          voucher.status,
-          voucher.remainingUses,
-          voucher.remainingValue?.amount ?? null,
-          input.tenantId,
-          input.redemption.idempotencyKey,
-        ),
-      this.#db
-        .prepare(
-          `INSERT INTO polybill_voucher_redemptions (tenant_id, redemption_id, voucher_id, idempotency_key, request_hash, value) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_vouchers WHERE tenant_id = ? AND voucher_id = ? AND update_token = ?)`,
-        )
-        .bind(
-          input.tenantId,
-          redemption.id,
-          voucher.id,
-          redemption.idempotencyKey,
-          requestHash,
-          JSON.stringify(redemption),
-          input.tenantId,
-          voucher.id,
-          input.redemption.idempotencyKey,
-        ),
-    ]);
+    const results = await this.#writes.execute(
+      [
+        this.#db
+          .prepare(
+            `UPDATE polybill_vouchers SET status = ?, remaining_uses = ?, remaining_amount = ?, remaining_currency = ?, value = ?, update_token = ? WHERE tenant_id = ? AND voucher_id = ? AND status = ? AND remaining_uses = ? AND COALESCE(remaining_amount, '') = COALESCE(?, '') AND NOT EXISTS (SELECT 1 FROM polybill_voucher_redemptions WHERE tenant_id = ? AND idempotency_key = ?)`,
+          )
+          .bind(
+            updated.status,
+            updated.remainingUses,
+            updated.remainingValue?.amount ?? null,
+            updated.remainingValue?.currency ?? null,
+            JSON.stringify(updated),
+            input.redemption.idempotencyKey,
+            input.tenantId,
+            voucher.id,
+            voucher.status,
+            voucher.remainingUses,
+            voucher.remainingValue?.amount ?? null,
+            input.tenantId,
+            input.redemption.idempotencyKey,
+          ),
+        this.#db
+          .prepare(
+            `INSERT INTO polybill_voucher_redemptions (tenant_id, redemption_id, voucher_id, idempotency_key, request_hash, value) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM polybill_vouchers WHERE tenant_id = ? AND voucher_id = ? AND update_token = ?)`,
+          )
+          .bind(
+            input.tenantId,
+            redemption.id,
+            voucher.id,
+            redemption.idempotencyKey,
+            requestHash,
+            JSON.stringify(redemption),
+            input.tenantId,
+            voucher.id,
+            input.redemption.idempotencyKey,
+          ),
+      ],
+      "license.issue",
+    );
     if (changes(results[0]) === 1 && changes(results[1]) === 1)
       return { kind: "redeemed", voucher: updated, redemption };
     const raced = await this.#redemption(input.tenantId, input.redemption.idempotencyKey);

@@ -144,6 +144,10 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
       );
   }
 
+  async commitResources(commits: readonly ResourceCommit[]): Promise<void> {
+    for (const commit of commits) await this.commitResource(commit);
+  }
+
   async listReconciliationTargets(input: {
     readonly tenantId: TenantId;
     readonly connectionId: string;
@@ -239,6 +243,14 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
       `${commit.tenantId}:payment:${commit.payment.id}`,
       globalThis.structuredClone(commit.payment),
     );
+    if (commit.externalPaymentId !== undefined)
+      this.seedMapping(
+        commit.tenantId,
+        commit.connectionId,
+        "payment",
+        commit.payment.id,
+        commit.externalPaymentId,
+      );
     this.#commits.push(globalThis.structuredClone(commit));
     if (reservation !== undefined)
       this.#discountReservations.set(`${commit.tenantId}:${reservation.id}`, {
