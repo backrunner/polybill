@@ -24,6 +24,7 @@ polybill/
 |   |-- provider-x402/
 |   |-- store-memory/
 |   |-- store-d1/
+|   |-- store-drizzle/            Database-neutral Drizzle persistence boundary
 |   |-- store-postgres/           Optional after the D1 contract stabilizes
 |   `-- testing/                  Fake provider, fixtures, contract runner
 |-- apps/
@@ -141,7 +142,9 @@ src/
 ### Store packages
 
 - `store-memory`：确定性测试、单进程示例，不允许生产多实例使用。
-- `store-d1`：Cloudflare 默认，包含 migrations、D1 session/consistency 策略。
+- `store-drizzle`：数据库无关的 Drizzle session/transaction/sequential persistence boundary。
+- `store-d1`：Cloudflare 默认，包含 migrations、D1 session/consistency 策略，并实现该 boundary
+  的 D1 batch/sequential backend。
 - `store-postgres`：Node/Hyperdrive 部署；遵循相同原子 Store conformance tests。
 
 ### `@polybill/testing`

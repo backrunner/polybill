@@ -37,6 +37,7 @@ verify、inbox claim 和 queue send。业务映射由 `webhooks.consume` 异步�
 | `@polybill/webhooks` | unified handler、consumer、memory inbox | yes |
 | `@polybill/store-memory` | deterministic test control plane | yes |
 | `@polybill/store-d1` | D1 schema and control-plane implementation | yes |
+| `@polybill/store-drizzle` | database-neutral Drizzle persistence coordinator | yes |
 | `@polybill/provider-*` | provider-specific adapter translation | required per adapter |
 | `polybill` | composition root and curated facade | yes |
 
