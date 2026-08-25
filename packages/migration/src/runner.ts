@@ -230,9 +230,13 @@ function report(
   return {
     planId: plan.id,
     phase,
+    total: plan.items.length,
+    scanned: results.length,
+    manual: verifications.filter((verification) => verification.status === "manual").length,
     totals,
     results,
     verifications,
+    losses: plan.losses,
     blockers: plan.losses.filter((loss) => loss.blocking),
   };
 }

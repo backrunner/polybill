@@ -116,8 +116,12 @@ export interface MigrationVerification {
 export interface MigrationReport {
   readonly planId: string;
   readonly phase: MigrationPhase;
+  readonly total: number;
+  readonly scanned: number;
+  readonly manual: number;
   readonly totals: Readonly<Record<MigrationItemResult["status"], number>>;
   readonly results: readonly MigrationItemResult[];
   readonly verifications: readonly MigrationVerification[];
+  readonly losses: readonly MigrationLoss[];
   readonly blockers: readonly MigrationLoss[];
 }

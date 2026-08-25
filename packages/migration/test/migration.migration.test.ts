@@ -30,6 +30,7 @@ describe("migration toolkit", () => {
     );
 
     expect(report.phase).toBe("dry_run");
+    expect(report).toMatchObject({ total: 2, scanned: 2, manual: 0, losses: [] });
     expect(target.previewCount).toBe(2);
     expect(target.writeCount).toBe(0);
   });
