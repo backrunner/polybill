@@ -1,10 +1,15 @@
 import {
   PolybillError,
+  addMoney,
+  compareMoney,
   parseId,
   type IdempotencyKey,
   type Money,
+  type Order,
+  type Payment,
   type PaymentId,
   type Refund,
+  subtractMoney,
 } from "@polybill/core";
 import { requireExternalId } from "./resource-runtime.js";
 import type { ResourceRuntime } from "./resource-runtime.js";
@@ -43,6 +48,15 @@ export class RefundService {
           ),
           "refund.create",
         );
+        const payment = await this.#runtime.options.store.getResource<Payment>(
+          this.#runtime.options.tenantId,
+          "payment",
+          command.paymentId,
+        );
+        if (payment === undefined) throw missingPayment("refund.create", command.paymentId);
+        const remaining = subtractMoney(payment.amount, payment.refundedAmount);
+        if (compareMoney(remaining, moneyZero(payment.amount)) === 0)
+          throw refundInvalid("Payment has no refundable balance", "refund.create");
         const remote = await port(context, {
           externalPaymentId,
           ...(command.amount === undefined ? {} : { amount: command.amount }),
@@ -55,6 +69,22 @@ export class RefundService {
             operation: "refund.decode",
             retryable: false,
           });
+        validateRemoteAmount(
+          remote.value.amount,
+          payment,
+          command.amount,
+          remaining,
+          remote.value.status,
+        );
+        if (
+          command.amount === undefined &&
+          (remote.value.status === "pending" || remote.value.status === "succeeded") &&
+          compareMoney(remote.value.amount, remaining) !== 0
+        )
+          throw refundInvalid(
+            "Provider full refund amount does not cover the remaining payment balance",
+            "refund.decode",
+          );
         const refund: Refund = {
           id: parseId<"RefundId">(this.#runtime.options.ids.next("ref"), "ref"),
           paymentId: command.paymentId,
@@ -73,6 +103,7 @@ export class RefundService {
           evidence: remote.evidence,
           occurredAt: this.#runtime.options.clock.now(),
         });
+        await this.#projectPayment(payment, undefined, refund, remote.evidence);
         return refund;
       },
     });
@@ -113,6 +144,23 @@ export class RefundService {
             operation: "refund.refresh",
             retryable: false,
           });
+        const payment = await this.#runtime.options.store.getResource<Payment>(
+          this.#runtime.options.tenantId,
+          "payment",
+          current.paymentId,
+        );
+        if (payment === undefined) throw missingPayment("refund.refresh", current.paymentId);
+        const remainingBefore = addMoney(
+          subtractMoney(payment.amount, payment.refundedAmount),
+          current.status === "succeeded" ? current.amount : moneyZero(payment.amount),
+        );
+        validateRemoteAmount(
+          remote.value.amount,
+          payment,
+          undefined,
+          remainingBefore,
+          remote.value.status,
+        );
         const refund: Refund = {
           ...current,
           amount: remote.value.amount,
@@ -129,10 +177,102 @@ export class RefundService {
           evidence: remote.evidence,
           occurredAt: this.#runtime.options.clock.now(),
         });
+        await this.#projectPayment(payment, current, refund, remote.evidence);
         return refund;
       },
     });
   }
+
+  async #projectPayment(
+    payment: Payment,
+    previous: Refund | undefined,
+    next: Refund,
+    evidence: unknown,
+  ): Promise<void> {
+    const before = previous?.status === "succeeded" ? previous.amount : moneyZero(payment.amount);
+    const after = next.status === "succeeded" ? next.amount : moneyZero(payment.amount);
+    const base = subtractMoney(payment.refundedAmount, before);
+    const refundedAmount = addMoney(base, after);
+    const projected: Payment = { ...payment, refundedAmount };
+    await this.#runtime.options.store.commitResource({
+      tenantId: this.#runtime.options.tenantId,
+      connectionId: this.#runtime.options.connection.id,
+      provider: this.#runtime.options.connection.provider,
+      entityType: "payment",
+      entityId: payment.id,
+      value: projected,
+      evidence,
+      occurredAt: this.#runtime.options.clock.now(),
+    });
+    const order = await this.#runtime.options.store.getResource<Order>(
+      this.#runtime.options.tenantId,
+      "order",
+      payment.orderId,
+    );
+    if (order === undefined) return;
+    const paymentStatus =
+      compareMoney(refundedAmount, payment.amount) === 0
+        ? "refunded"
+        : compareMoney(refundedAmount, moneyZero(payment.amount)) > 0
+          ? "partially_refunded"
+          : order.paymentStatus;
+    if (paymentStatus === order.paymentStatus) return;
+    await this.#runtime.options.store.commitResource({
+      tenantId: this.#runtime.options.tenantId,
+      connectionId: this.#runtime.options.connection.id,
+      provider: this.#runtime.options.connection.provider,
+      entityType: "order",
+      entityId: order.id,
+      value: { ...order, paymentStatus },
+      evidence,
+      occurredAt: this.#runtime.options.clock.now(),
+    });
+  }
+}
+
+function validateRemoteAmount(
+  remote: Money,
+  payment: Payment,
+  requested: Money | undefined,
+  remaining: Money,
+  status: "pending" | "succeeded" | "failed" | "canceled",
+): void {
+  if (remote.currency !== payment.amount.currency)
+    throw refundInvalid("Provider refund currency does not match payment", "refund.decode");
+  if (
+    compareMoney(remote, moneyZero(payment.amount)) === 0 &&
+    (status === "pending" || status === "succeeded")
+  )
+    throw refundInvalid("Provider returned a zero refund amount", "refund.decode");
+  if (compareMoney(remote, remaining) > 0)
+    throw refundInvalid("Provider refund exceeds the remaining payment balance", "refund.decode");
+  if (requested !== undefined) {
+    if (requested.currency !== payment.amount.currency || compareMoney(remote, requested) !== 0)
+      throw refundInvalid(
+        "Provider refund amount does not match the requested amount",
+        "refund.decode",
+      );
+  }
+}
+
+function moneyZero(value: Money): Money {
+  return { amount: "0" as Money["amount"], currency: value.currency };
+}
+
+function missingPayment(operation: string, paymentId: PaymentId): PolybillError {
+  return new PolybillError(`Canonical payment ${paymentId} was not found`, {
+    code: "not_found",
+    operation,
+    retryable: false,
+  });
+}
+
+function refundInvalid(message: string, operation: string): PolybillError {
+  return new PolybillError(message, {
+    code: "provider_response_invalid",
+    operation,
+    retryable: false,
+  });
 }
 function decodeRefund(value: unknown): Refund {
   if (typeof value !== "object" || value === null || !("id" in value) || !("amount" in value))
