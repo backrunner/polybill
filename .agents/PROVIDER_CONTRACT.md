@@ -97,6 +97,10 @@ webhook.verify/replay/simulate
 migration.catalog/customer/subscription/payment_method
 ```
 
+Paddle Billing exposes only the full-refund command in this adapter. A partial amount is rejected
+with `unsupported_capability` before any provider request; it must never be silently converted to a
+full refund.
+
 `dispute.read` remains explicitly unsupported until a canonical Dispute aggregate, mapping, and
 reconciliation port exist. Provider dispute webhooks must be retained as verified raw evidence and
 reported as `unmapped_provider_event.v1`; they must not be coerced into payment failure or refund

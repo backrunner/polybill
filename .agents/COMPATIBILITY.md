@@ -40,8 +40,8 @@
   because checkout creation works.
 - Refund projections are ledger-based: a provider response must match the requested currency and
   amount and cannot increase the canonical refunded balance beyond the payment. Paddle Billing
-  `refund.partial` is intentionally `unsupported` until historical adjustment allocation can be
-  read authoritatively; callers must use full refunds or reconcile first.
+  supports full refunds only; `refund.partial` is explicitly `unsupported` and is rejected before
+  transport.
 - Stripe payment-intent processing, action-required, canceled, and failed events are mapped to
   explicit payment lifecycle events. Stripe dispute events remain `unmapped_provider_event.v1`
   because the canonical Dispute aggregate and store contract are not yet implemented; they are

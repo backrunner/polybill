@@ -5,30 +5,24 @@ import { describe, expect, it } from "vitest";
 import { createPaddleAdapter } from "../src/index.js";
 
 describe("Paddle refund contract", () => {
-  it("allocates canonical partial amounts across authoritative transaction lines", async () => {
-    const transaction = {
-      id: "txn_fixture",
-      currency_code: "USD",
-      details: {
-        line_items: [
-          { id: "txnitm_one", totals: { total: "700" } },
-          { id: "txnitm_two", totals: { total: "500" } },
-        ],
-      },
-    };
+  it("rejects partial refunds before any Paddle request", async () => {
+    const scripted = createScriptedFetch([]);
+    const refunds = createPaddleAdapter().refunds;
+    if (refunds?.create === undefined || refunds.get === undefined)
+      throw new Error("Paddle refund port is missing");
+
+    await expect(
+      refunds.create(context(scripted.fetch), {
+        externalPaymentId: "txn_fixture",
+        amount: money("900", "USD"),
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability", operation: "refund.partial" });
+    scripted.assertConsumed();
+  });
+
+  it("creates and reads a full refund", async () => {
     const scripted = createScriptedFetch([
-      {
-        method: "GET",
-        url: "https://sandbox-api.paddle.com/transactions/txn_fixture",
-        response: Response.json({ data: transaction }),
-      },
-      {
-        method: "POST",
-        url: "https://sandbox-api.paddle.com/adjustments",
-        response: Response.json({
-          data: adjustment("adj_partial", "pending_approval", "900"),
-        }),
-      },
       {
         method: "POST",
         url: "https://sandbox-api.paddle.com/adjustments",
@@ -43,55 +37,15 @@ describe("Paddle refund contract", () => {
     const refunds = createPaddleAdapter().refunds;
     if (refunds?.create === undefined || refunds.get === undefined)
       throw new Error("Paddle refund port is missing");
-
-    await expect(
-      refunds.create(context(scripted.fetch), {
-        externalPaymentId: "txn_fixture",
-        amount: money("900", "USD"),
-        reason: "requested_by_customer",
-        metadata: {},
-      }),
-    ).resolves.toMatchObject({ value: { amount: money("900", "USD"), status: "pending" } });
-    await expect(scripted.requests[1]?.clone().json()).resolves.toMatchObject({
-      type: "partial",
-      items: [
-        { item_id: "txnitm_one", type: "partial", amount: "700" },
-        { item_id: "txnitm_two", type: "partial", amount: "200" },
-      ],
-    });
     await expect(
       refunds.create(context(scripted.fetch), {
         externalPaymentId: "txn_fixture",
         metadata: {},
       }),
-    ).resolves.toMatchObject({ value: { status: "succeeded" } });
+    ).resolves.toMatchObject({ value: { amount: money("1200", "USD"), status: "succeeded" } });
     await expect(refunds.get(context(scripted.fetch), "adj_full")).resolves.toMatchObject({
       value: { externalId: "adj_full", status: "succeeded" },
     });
-    scripted.assertConsumed();
-  });
-
-  it("rejects currency mismatch before creating an adjustment", async () => {
-    const scripted = createScriptedFetch([
-      {
-        method: "GET",
-        url: "https://sandbox-api.paddle.com/transactions/txn_fixture",
-        response: Response.json({
-          data: {
-            id: "txn_fixture",
-            currency_code: "EUR",
-            details: { line_items: [{ id: "txnitm_one", totals: { total: "700" } }] },
-          },
-        }),
-      },
-    ]);
-    await expect(
-      createPaddleAdapter().refunds?.create?.(context(scripted.fetch), {
-        externalPaymentId: "txn_fixture",
-        amount: money("100", "USD"),
-        metadata: {},
-      }),
-    ).rejects.toMatchObject({ code: "invalid_request" });
     scripted.assertConsumed();
   });
 });
