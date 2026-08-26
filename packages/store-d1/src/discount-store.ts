@@ -14,15 +14,15 @@ import {
   type TenantId,
 } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 export class D1DiscountStore implements DiscountStore {
   readonly #db: D1DatabaseLike;
-  readonly #writes: D1WriteCoordinator;
+  readonly #writes: D1PersistenceWriter;
 
-  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1PersistenceWriter } = {}) {
     this.#db = db;
-    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+    this.#writes = options.writes ?? createD1PersistenceAdapter(db);
   }
 
   async createDiscount(

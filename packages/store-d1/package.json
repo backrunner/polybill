@@ -25,6 +25,7 @@
     "@polybill/core": "workspace:^",
     "@polybill/licensing": "workspace:^",
     "@polybill/migration": "workspace:^",
+    "@polybill/store-drizzle": "workspace:^",
     "@polybill/webhooks": "workspace:^"
   },
   "devDependencies": {

@@ -24,7 +24,7 @@ import { decodeCheckout, decodePrice, parseStored } from "./application-codecs.j
 import { commitCheckoutToD1 } from "./checkout-commit.js";
 import { D1DiscountRedemptionStore } from "./discount-redemption-store.js";
 import { D1DiscountStore } from "./discount-store.js";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 interface IdempotencyRow {
   readonly payload_hash: string;
@@ -37,7 +37,7 @@ interface IdempotencyRow {
 
 export interface D1ApplicationStoreOptions {
   readonly leaseToken?: () => string;
-  readonly writes?: D1WriteCoordinator;
+  readonly writes?: D1PersistenceWriter;
 }
 
 export class D1ApplicationStore implements ApplicationStore {
@@ -45,11 +45,11 @@ export class D1ApplicationStore implements ApplicationStore {
   readonly #leaseToken: () => string;
   readonly #discounts: D1DiscountStore;
   readonly #discountRedemptions: D1DiscountRedemptionStore;
-  readonly #writes: D1WriteCoordinator;
+  readonly #writes: D1PersistenceWriter;
 
   constructor(db: D1DatabaseLike, options: D1ApplicationStoreOptions = {}) {
     this.#db = db;
-    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+    this.#writes = options.writes ?? createD1PersistenceAdapter(db);
     this.#leaseToken = options.leaseToken ?? (() => `lease_${globalThis.crypto.randomUUID()}`);
     this.#discounts = new D1DiscountStore(db, { writes: this.#writes });
     this.#discountRedemptions = new D1DiscountRedemptionStore(db);

@@ -1,10 +1,10 @@
 import type { CheckoutCommit } from "@polybill/application";
 import type { TenantId } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 export interface CheckoutCommitOptions {
-  readonly writes?: D1WriteCoordinator;
+  readonly writes?: D1PersistenceWriter;
 }
 
 export async function commitCheckoutToD1(
@@ -12,7 +12,7 @@ export async function commitCheckoutToD1(
   commit: CheckoutCommit,
   options: CheckoutCommitOptions = {},
 ): Promise<void> {
-  const writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+  const writes = options.writes ?? createD1PersistenceAdapter(db);
   const existing = await checkoutCommitState(db, commit);
   if (existing === "same") return;
   if (existing === "conflict")

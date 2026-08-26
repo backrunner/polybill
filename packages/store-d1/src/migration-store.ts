@@ -8,7 +8,7 @@ import type {
 } from "@polybill/migration";
 import type { TenantId } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 interface ItemStateRow {
   readonly state: "pending" | "processing" | "completed" | "failed";
@@ -18,7 +18,7 @@ export interface D1MigrationStoreOptions {
   readonly now?: () => number;
   readonly leaseToken?: () => string;
   readonly leaseMs?: number;
-  readonly writes?: D1WriteCoordinator;
+  readonly writes?: D1PersistenceWriter;
 }
 
 export class D1MigrationStore implements MigrationStore {
@@ -27,7 +27,7 @@ export class D1MigrationStore implements MigrationStore {
   readonly #now: () => number;
   readonly #leaseToken: () => string;
   readonly #leaseMs: number;
-  readonly #writes: D1WriteCoordinator;
+  readonly #writes: D1PersistenceWriter;
 
   constructor(db: D1DatabaseLike, tenantId: TenantId, options: D1MigrationStoreOptions = {}) {
     this.#db = db;
@@ -35,7 +35,7 @@ export class D1MigrationStore implements MigrationStore {
     this.#now = options.now ?? Date.now;
     this.#leaseToken = options.leaseToken ?? (() => globalThis.crypto.randomUUID());
     this.#leaseMs = options.leaseMs ?? 60_000;
-    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+    this.#writes = options.writes ?? createD1PersistenceAdapter(db);
   }
 
   async savePlan(plan: MigrationPlan): Promise<void> {

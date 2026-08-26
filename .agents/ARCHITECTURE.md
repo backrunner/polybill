@@ -220,8 +220,9 @@ Cloudflare 默认实现使用 D1 保存 control plane、Queue 处理 outbox、Du
 执行。它以 Drizzle session steps 为边界，优先使用 Drizzle transaction；对没有事务能力的
 数据库可显式选择 replay-safe sequential 模式，或配置为事务不可用即失败。每个 store adapter
 只负责把 canonical intent 编译成自己的 Drizzle statements，不把 ORM、方言状态或连接对象
-泄漏到 application。Cloudflare D1 的 `D1WriteCoordinator` 是该契约的兼容实现，默认使用
-D1 `batch`，也支持顺序回退。顺序模式部分失败会报告已完成步骤和 operation，由上层重试或
+泄漏到 application。Cloudflare D1 通过 `@polybill/store-d1` 的 statement adapter 接入该契约，
+默认使用 D1 `batch`，也支持顺序回退。D1 不再暴露独立的 coordinator 类型。顺序模式部分失败
+会报告已完成步骤和 operation，由上层重试或
 对账收敛；业务代码不得直接依赖某个数据库的 transaction/batch API。退款快照、支付退款
 累计额和订单支付状态必须作为一个 `commitResources` 资源组提交，不能把先写退款、后写支付
 的半套账务当成成功。

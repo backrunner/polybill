@@ -22,16 +22,16 @@ import {
 import { consumeVoucher, validateVoucher } from "./voucher-logic.js";
 import { D1EntitlementStore } from "./entitlement-store.js";
 import { changes, type LicenseInstanceRow, type VoucherRow } from "./licensing-rows.js";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 export class D1LicensingStore extends D1EntitlementStore implements LicensingStore {
   readonly #db: D1DatabaseLike;
-  readonly #writes: D1WriteCoordinator;
+  readonly #writes: D1PersistenceWriter;
 
-  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1PersistenceWriter } = {}) {
     super(db, options);
     this.#db = db;
-    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+    this.#writes = options.writes ?? createD1PersistenceAdapter(db);
   }
 
   async issueLicense(

@@ -1,6 +1,6 @@
 import type { CanonicalBillingEvent } from "@polybill/core";
 import type { InboxClaim, InboxRecord, WebhookInboxStore } from "@polybill/webhooks";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 export interface D1Result<T = unknown> {
   readonly results?: readonly T[];
@@ -24,11 +24,11 @@ export interface D1InboxRow {
 
 export class D1WebhookInbox implements WebhookInboxStore {
   readonly #db: D1DatabaseLike;
-  readonly #writes: D1WriteCoordinator;
+  readonly #writes: D1PersistenceWriter;
 
-  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1PersistenceWriter } = {}) {
     this.#db = db;
-    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+    this.#writes = options.writes ?? createD1PersistenceAdapter(db);
   }
 
   async claim(record: InboxRecord): Promise<InboxClaim> {

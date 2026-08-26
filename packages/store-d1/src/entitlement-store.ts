@@ -9,15 +9,15 @@ import type {
 } from "@polybill/licensing";
 import type { D1DatabaseLike } from "./d1.js";
 import { decodeEntitlementGrant, decodeEntitlementPolicy } from "./licensing-codecs.js";
-import { DefaultD1WriteCoordinator, type D1WriteCoordinator } from "./write-coordinator.js";
+import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
 
 export class D1EntitlementStore implements EntitlementStore {
   readonly #db: D1DatabaseLike;
-  readonly #writes: D1WriteCoordinator;
+  readonly #writes: D1PersistenceWriter;
 
-  constructor(db: D1DatabaseLike, options: { readonly writes?: D1WriteCoordinator } = {}) {
+  constructor(db: D1DatabaseLike, options: { readonly writes?: D1PersistenceWriter } = {}) {
     this.#db = db;
-    this.#writes = options.writes ?? new DefaultD1WriteCoordinator(db);
+    this.#writes = options.writes ?? createD1PersistenceAdapter(db);
   }
 
   async createEntitlementPolicy(
