@@ -1,10 +1,86 @@
 import { createWebCryptoPort, hmacSha256, utf8 } from "@polybill/adapter-kit";
-import { parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
+import { money, parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
 import { createScriptedFetch, VirtualClock } from "@polybill/testing";
 import { describe, expect, it } from "vitest";
 import { createLemonSqueezyAdapter } from "../src/index.js";
 
 describe("Lemon Squeezy webhook contract", () => {
+  it("locks the requested variant and explicitly creates a test checkout with an integer price", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://api.lemonsqueezy.com/v1/checkouts",
+        response: Response.json(
+          jsonApi("checkouts", "checkout_fixture", {
+            url: "https://store.lemonsqueezy.com/checkout/fixture",
+          }),
+        ),
+      },
+    ]);
+    const ctx = {
+      ...context(scripted.fetch),
+      credentials: { apiKey: "lemon_fixture_key", storeId: "42" },
+    };
+    await createLemonSqueezyAdapter().checkout?.create(ctx, {
+      orderId: parseId<"OrderId">("ord_lemoncustom", "ord"),
+      lines: [
+        {
+          skuId: parseId<"SkuId">("sku_lemoncustom", "sku"),
+          quantity: 1,
+          price: { kind: "custom" },
+          unitAmount: money("2500", "USD"),
+          externalPriceId: "21",
+        },
+      ],
+      grossTotal: money("2500", "USD"),
+      total: money("2500", "USD"),
+      successUrl: "https://merchant.example/ok",
+      cancelUrl: "https://merchant.example/cancel",
+      metadata: {},
+    });
+    expect(await scripted.requests[0]?.json()).toMatchObject({
+      data: {
+        attributes: {
+          test_mode: true,
+          custom_price: 2500,
+          product_options: { enabled_variants: [21] },
+        },
+      },
+    });
+    scripted.assertConsumed();
+  });
+
+  it("does not collapse later subscription updates into the same canonical event", async () => {
+    const adapter = createLemonSqueezyAdapter();
+    const ctx = context(globalThis.fetch);
+    const ids: string[] = [];
+    for (const status of ["active", "paused"]) {
+      const body = JSON.stringify({
+        meta: { event_name: "subscription_updated", test_mode: true },
+        data: { id: "84", attributes: { status } },
+      });
+      const input = {
+        rawBody: utf8(body),
+        headers: new Headers({ "x-signature": hex(await hmacSha256("secret", utf8(body))) }),
+        secret: { active: "secret", activeKeyId: "current" },
+        environment: "test" as const,
+        now: ctx.clock.now(),
+      };
+      const verified = await adapter.webhooks.verify(input);
+      const events = await adapter.webhooks.map(adapter.webhooks.decode(verified), {
+        tenantId: ctx.tenantId,
+        connection: ctx.connection,
+        observedAt: ctx.clock.now(),
+        lookup: { findCanonicalId: async () => "sub_canonical" },
+      });
+      ids.push(events[0]?.id ?? "missing");
+      await expect(
+        adapter.webhooks.verify({ ...input, environment: "live" }),
+      ).rejects.toMatchObject({ code: "signature_invalid" });
+    }
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).not.toContain("missing");
+  });
   it("does not claim synchronous subscription creation", async () => {
     const capability = (
       await createLemonSqueezyAdapter().getCapabilities(context(globalThis.fetch))

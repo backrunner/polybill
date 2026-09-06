@@ -79,7 +79,7 @@ describe("refund ledger contract", () => {
         paymentId: created.payment.id,
         amount: money("1600", "USD"),
       }),
-    ).rejects.toMatchObject({ code: "provider_response_invalid" });
+    ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
       refunds.create({
         idempotencyKey: parseIdempotencyKey("refund:create:0003"),

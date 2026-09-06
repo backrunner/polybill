@@ -1,6 +1,7 @@
 import {
   object,
   optionalString,
+  providerIntegerAmount,
   stringField,
   type CheckoutProvider,
   type ProviderCheckoutCommand,
@@ -23,9 +24,6 @@ export const dodoCheckout: CheckoutProvider = {
       ),
     );
   },
-  async recoverByIdempotencyKey(context, _key, command) {
-    return create(context, command);
-  },
 };
 
 async function create(
@@ -44,7 +42,9 @@ async function create(
     return {
       product_id: line.externalPriceId,
       quantity: line.quantity,
-      ...(line.price.kind === "custom" ? { amount: line.unitAmount.amount } : {}),
+      ...(line.price.kind === "custom"
+        ? { amount: providerIntegerAmount(line.unitAmount.amount, "dodo") }
+        : {}),
     };
   });
   const response = await dodoRequest(context, "POST", "/checkouts", {
@@ -76,7 +76,15 @@ function decodeStatus(value: unknown): ProviderCheckoutSnapshot {
       ? "complete"
       : rawStatus === "failed" || rawStatus === "cancelled"
         ? "canceled"
-        : "open";
+        : [
+              "collecting_details",
+              "processing",
+              "requires_payment_method",
+              "requires_confirmation",
+              "requires_customer_action",
+            ].includes(rawStatus)
+          ? "open"
+          : "unknown";
   return {
     externalId: stringField(root, "id", "dodo", "dodo.checkout.decode"),
     ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
@@ -98,7 +106,7 @@ function result(
       observedAt: context.clock.now(),
       rawStatus: value.rawStatus,
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

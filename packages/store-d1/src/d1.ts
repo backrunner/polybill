@@ -32,9 +32,10 @@ export class D1WebhookInbox implements WebhookInboxStore {
   }
 
   async claim(record: InboxRecord): Promise<InboxClaim> {
+    const bodyDigest = await digest(record.verified.rawBody);
     const inserted = await this.#db
       .prepare(
-        `INSERT INTO polybill_inbox (tenant_id, connection_id, environment, external_delivery_key, provider_event_id, received_at, verified_at, raw_body_digest, raw_body, verification_key_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing') ON CONFLICT DO NOTHING`,
+        `INSERT INTO polybill_inbox (tenant_id, connection_id, environment, external_delivery_key, provider_event_id, received_at, verified_at, raw_body_digest, raw_body, verification_key_id, dispatch_lease_until, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing') ON CONFLICT DO NOTHING`,
       )
       .bind(
         record.tenantId,
@@ -44,12 +45,28 @@ export class D1WebhookInbox implements WebhookInboxStore {
         record.providerEventId ?? null,
         record.receivedAt,
         record.verified.verifiedAt,
-        await digest(record.verified.rawBody),
+        bodyDigest,
         record.verified.rawBody,
         record.verified.keyId ?? null,
+        Date.parse(record.receivedAt) + 60_000,
       )
       .run();
     if (inserted.meta?.changes === 1) return "claimed";
+    const reclaimed = await this.#db
+      .prepare(
+        "UPDATE polybill_inbox SET state = 'processing', dispatch_lease_until = ? WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ? AND state IN ('processing', 'retry_wait') AND dispatch_lease_until <= ? AND raw_body_digest = ?",
+      )
+      .bind(
+        Date.parse(record.receivedAt) + 60_000,
+        record.tenantId,
+        record.connection.id,
+        record.connection.environment,
+        record.deliveryKey,
+        Date.parse(record.receivedAt),
+        bodyDigest,
+      )
+      .run();
+    if (reclaimed.meta?.changes === 1) return "claimed";
     const existing = await this.#db
       .prepare(
         "SELECT state FROM polybill_inbox WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
@@ -62,6 +79,20 @@ export class D1WebhookInbox implements WebhookInboxStore {
       )
       .first<{ state: D1InboxRow["state"] }>();
     return existing?.state === "applied" ? "duplicate_applied" : "duplicate_processing";
+  }
+
+  async markQueued(record: InboxRecord): Promise<void> {
+    await this.#db
+      .prepare(
+        "UPDATE polybill_inbox SET dispatch_lease_until = NULL WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
+      )
+      .bind(
+        record.tenantId,
+        record.connection.id,
+        record.connection.environment,
+        record.deliveryKey,
+      )
+      .run();
   }
 
   async markApplied(record: InboxRecord, events: readonly CanonicalBillingEvent[]): Promise<void> {
@@ -88,10 +119,11 @@ export class D1WebhookInbox implements WebhookInboxStore {
   async markFailed(record: InboxRecord, errorCode: string, retryable: boolean): Promise<void> {
     await this.#db
       .prepare(
-        "UPDATE polybill_inbox SET state = ?, attempts = attempts + 1, last_error_code = ? WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",
+        "UPDATE polybill_inbox SET state = ?, attempts = attempts + 1, last_error_code = ?, dispatch_lease_until = CASE WHEN ? = 'queue_dispatch_failed' THEN 0 ELSE dispatch_lease_until END WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ? AND state != 'applied'",
       )
       .bind(
         retryable ? "retry_wait" : "dead_letter",
+        errorCode,
         errorCode,
         record.tenantId,
         record.connection.id,

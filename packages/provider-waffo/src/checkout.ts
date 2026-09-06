@@ -86,7 +86,7 @@ function result(
       observedAt: context.clock.now(),
       rawStatus: value.rawStatus,
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

@@ -15,7 +15,7 @@ export function createX402Webhooks(options: X402AdapterOptions): WebhookProvider
         input.headers,
         input.rawBody,
         keys,
-        options.nonceStore,
+        input.replayProtection === "inbox" ? { putIfAbsent: () => true } : options.nonceStore,
         Math.floor(Date.parse(input.now) / 1000),
         options.notifyToleranceSeconds,
         options.notifyMaxBodyBytes,
@@ -30,7 +30,7 @@ export function createX402Webhooks(options: X402AdapterOptions): WebhookProvider
       return {
         provider: "x402",
         environment: input.environment,
-        deliveryKey: `x402:${providerEventId}`,
+        deliveryKey: `x402:${result.keyId}:${result.notify.nonce}`,
         providerEventId,
         rawBody: input.rawBody,
         verifiedAt: input.now,

@@ -20,7 +20,8 @@ export const dodoWebhooks: WebhookProvider = {
       .split(" ")
       .map((value) => value.trim())
       .filter(Boolean)
-      .map((value) => (value.startsWith("v1,") ? value.slice(3) : value));
+      .filter((value) => value.startsWith("v1,"))
+      .map((value) => value.slice(3));
     if (messageId === null || timestampText === null || signatures.length === 0)
       throw signatureError("dodo");
     const timestamp = Number(timestampText);
@@ -46,10 +47,11 @@ export const dodoWebhooks: WebhookProvider = {
   decode(event) {
     const root = decodeRoot(event.rawBody);
     const payload = object(root.data, "dodo", "dodo.webhook.decode");
-    const externalId = externalObjectId(payload);
+    const type = optionalString(root, "type") ?? "unknown";
+    const externalId = externalObjectId(payload, type);
     const timestamp = optionalString(root, "timestamp") ?? optionalString(root, "created_at");
     return {
-      type: optionalString(root, "type") ?? "unknown",
+      type,
       externalIds: {
         ...(event.providerEventId === undefined ? {} : { event: event.providerEventId }),
         ...(externalId === undefined ? {} : { object: externalId }),
@@ -115,20 +117,17 @@ function decodeRoot(rawBody: Uint8Array) {
   return object(value, "dodo", "dodo.webhook.decode");
 }
 
-function externalObjectId(value: Readonly<Record<string, unknown>>): string | undefined {
-  for (const key of [
-    "payment_id",
-    "subscription_id",
-    "refund_id",
-    "license_key_id",
-    "customer_id",
-    "product_id",
-    "id",
-  ]) {
-    const found = optionalString(value, key);
-    if (found !== undefined) return found;
-  }
-  return undefined;
+function externalObjectId(
+  value: Readonly<Record<string, unknown>>,
+  type: string,
+): string | undefined {
+  const resource = type.split(".")[0];
+  if (
+    resource === undefined ||
+    !["payment", "subscription", "refund", "license_key", "customer", "product"].includes(resource)
+  )
+    return optionalString(value, "id");
+  return optionalString(value, `${resource}_id`);
 }
 
 function mappingFor(

@@ -113,6 +113,16 @@ describe("x402 adapter contract", () => {
       environment: "test" as const,
       now: parseIsoDateTime(new Date(NOW_SECONDS * 1000).toISOString()),
     };
+    const firstInboxAttempt = await adapter.webhooks.verify({
+      ...input,
+      replayProtection: "inbox",
+    });
+    const retriedInboxAttempt = await adapter.webhooks.verify({
+      ...input,
+      replayProtection: "inbox",
+    });
+    expect(retriedInboxAttempt.deliveryKey).toBe(firstInboxAttempt.deliveryKey);
+    // Verification alone must not burn the nonce before a durable inbox can accept it.
     const verified = await adapter.webhooks.verify(input);
     const decoded = adapter.webhooks.decode(verified);
     const events = await adapter.webhooks.map(decoded, {
@@ -259,6 +269,42 @@ describe("x402 adapter contract", () => {
         { refId: "ref_test", orderId: "ord_x4020001", atomicAmount: "10000" },
       ),
     ).rejects.toMatchObject({ code: "provider_response_invalid" });
+  });
+
+  it("rejects malformed chain finality and an empty signer trust set", async () => {
+    for (const overrides of [
+      { valid: "true" },
+      { confirmed: "true" },
+      { confirmations: "3" },
+      { confirmations: -1 },
+    ]) {
+      const scripted = createScriptedFetch([
+        {
+          method: "POST",
+          url: "https://pay.example/verify-receipt",
+          response: Response.json({ ...chainResult(true, 3), ...overrides }),
+        },
+      ]);
+      await expect(
+        verifyX402Settlement(
+          context(scripted.fetch),
+          options(createNonceStore()),
+          settledNotify(),
+          { refId: "ref_test", orderId: "ord_x4020001", atomicAmount: "10000" },
+        ),
+      ).rejects.toMatchObject({ code: "provider_response_invalid" });
+      scripted.assertConsumed();
+    }
+    const unused = createScriptedFetch([]);
+    await expect(
+      verifyX402Settlement(
+        context(unused.fetch),
+        { ...options(createNonceStore()), trustedReceiptSigners: [] },
+        settledNotify(),
+        { refId: "ref_test", orderId: "ord_x4020001", atomicAmount: "10000" },
+      ),
+    ).rejects.toThrow("trusted receipt signer");
+    expect(unused.requests).toHaveLength(0);
   });
 });
 

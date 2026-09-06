@@ -1,6 +1,8 @@
 import {
   object,
   optionalString,
+  providerIntegerAmount,
+  providerNumericIdentifier,
   stringField,
   type CheckoutProvider,
   type ProviderCheckoutCommand,
@@ -59,12 +61,25 @@ async function create(
     data: {
       type: "checkouts",
       attributes: {
-        product_options: { redirect_url: command.successUrl },
+        test_mode: context.connection.environment === "test",
+        product_options: {
+          redirect_url: command.successUrl,
+          enabled_variants: [providerNumericIdentifier(line.externalPriceId, "lemonSqueezy")],
+        },
         checkout_data: {
           ...(command.customerEmail === undefined ? {} : { email: command.customerEmail }),
           custom: { ...command.metadata, polybill_order_id: command.orderId },
         },
-        ...(line.price.kind === "custom" ? { custom_price: line.unitAmount.amount } : {}),
+        ...(line.price.kind === "custom"
+          ? {
+              custom_price: providerIntegerAmount(
+                line.unitAmount.amount,
+                "lemonSqueezy",
+                Number.MAX_SAFE_INTEGER,
+                1,
+              ),
+            }
+          : {}),
       },
       relationships: {
         store: { data: { type: "stores", id: storeId } },

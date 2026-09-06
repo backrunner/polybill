@@ -218,6 +218,13 @@ adapter 将 canonical idempotency key hash/缩短到 provider 限制，但 evide
 超时后恢复顺序：按原生 idempotency 查询结果、按 external reference 搜索、执行 read-back、
 最后返回 `outcome_unknown`。不得直接生成新 key 重试。
 
+2026-09-06 复核：Dodo、Polar 和 Creem 不再通过重复 POST 恢复 checkout，未经文档保证的
+header/tracking reference 只提供诊断关联。Stripe replay 必须有持久化 attemptedAt，且距原始尝试
+少于 23 小时（为官方至少 24 小时保留期留出余量）；旧记录缺少时间时拒绝自动重发。
+provider key 由 tenant、connection、environment、provider、method、path 和 canonical key
+的结构化 tuple 生成 SHA-256。所有 provider 请求使用 context deadline 并拒绝重定向。
+响应解码、body streaming 或本地提交失败不能释放可能已经发送的 mutation claim。
+
 ## 8. Error model
 
 ```ts

@@ -48,7 +48,13 @@ export function assertWebhookTimestamp(
   toleranceSeconds: number,
   provider: ProviderName,
 ): void {
-  if (!Number.isSafeInteger(timestampSeconds)) throw signatureError(provider);
+  if (
+    !Number.isSafeInteger(timestampSeconds) ||
+    !Number.isFinite(Date.parse(now)) ||
+    !Number.isFinite(toleranceSeconds) ||
+    toleranceSeconds < 0
+  )
+    throw signatureError(provider);
   const age = Math.abs(Date.parse(now) / 1000 - timestampSeconds);
   if (age > toleranceSeconds) {
     throw new PolybillError("Webhook timestamp is outside the accepted tolerance", {
@@ -67,6 +73,10 @@ export function signatureError(provider: ProviderName): PolybillError {
     provider,
     retryable: false,
   });
+}
+
+export async function rawDeliveryKey(provider: ProviderName, rawBody: Uint8Array): Promise<string> {
+  return `${provider}:sha256:${toHex(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", copy(rawBody))))}`;
 }
 
 export function utf8(value: string): Uint8Array {

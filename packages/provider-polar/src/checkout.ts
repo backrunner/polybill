@@ -25,15 +25,22 @@ export const polarCheckout: CheckoutProvider = {
       ),
     );
   },
-  async recoverByIdempotencyKey(context, _key, command) {
-    return create(context, command);
-  },
 };
 
 async function create(
   context: ProviderContext,
   command: ProviderCheckoutCommand,
 ): Promise<ProviderOperationResult<ProviderCheckoutSnapshot>> {
+  if (command.lines.length !== 1)
+    throw new PolybillError(
+      "Polar checkout products are alternatives; a canonical cart requires exactly one product",
+      {
+        code: "unsupported_capability",
+        operation: "polar.checkout.create",
+        provider: "polar",
+        retryable: false,
+      },
+    );
   const products = command.lines.map((line) => {
     if (line.externalPriceId === undefined)
       throw new PolybillError("Polar checkout requires a mapped product", {
@@ -107,7 +114,7 @@ function result(
       observedAt: context.clock.now(),
       rawStatus: value.rawStatus,
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

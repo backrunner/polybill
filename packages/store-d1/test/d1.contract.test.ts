@@ -93,6 +93,7 @@ describe("D1 control-plane contract", () => {
     await binding.exec(await migration("0008_discount_redemptions.sql"));
     await binding.exec(await migration("0009_inbox_scope.sql"));
     await binding.exec(await migration("0010_migration_reports.sql"));
+    await binding.exec(await migration("0011_inbox_dispatch.sql"));
   });
 
   afterEach(async () => {
@@ -109,6 +110,47 @@ describe("D1 control-plane contract", () => {
       beneficiaryRef: "legacy:unassigned",
       status: "active",
       updatedAt: now,
+    });
+  });
+
+  it("reclaims dispatch leases atomically across independent inbox clients", async () => {
+    const first = new D1WebhookInbox(db);
+    const second = new D1WebhookInbox(db);
+    const record = inboxRecord(tenantId, connectionId, "test", "dispatch-lease");
+    expect(await first.claim(record)).toBe("claimed");
+    expect(await second.claim(record)).toBe("duplicate_processing");
+    const retried = { ...record, receivedAt: parseIsoDateTime("2026-08-25T00:01:01.000Z") };
+    const claims = await Promise.all([first.claim(retried), second.claim(retried)]);
+    expect(claims.filter((claim) => claim === "claimed")).toHaveLength(1);
+    await first.markFailed(retried, "queue_dispatch_failed", true);
+    expect(await second.claim(retried)).toBe("claimed");
+    await second.markQueued(retried);
+    expect(
+      await first.claim({ ...retried, receivedAt: parseIsoDateTime("2026-08-25T00:05:00.000Z") }),
+    ).toBe("duplicate_processing");
+    await first.markApplied(retried, []);
+    await second.markFailed(retried, "queue_dispatch_failed", true);
+    expect(await first.claim(retried)).toBe("duplicate_applied");
+  });
+
+  it("atomically binds a connection identity before test/live mapping access", async () => {
+    const first = new D1ApplicationStore(db);
+    const second = new D1ApplicationStore(db);
+    const connection = {
+      tenantId,
+      id: connectionId,
+      provider: "stripe",
+      environment: "test",
+    } as const;
+    const results = await Promise.allSettled([
+      first.bindConnection(connection),
+      second.bindConnection({ ...connection, environment: "live" }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const failure = results.find((result) => result.status === "rejected");
+    expect(failure).toMatchObject({
+      status: "rejected",
+      reason: { code: "conflict", operation: "connection.bind" },
     });
   });
 
@@ -140,6 +182,7 @@ describe("D1 control-plane contract", () => {
         )
         .run();
       await legacyDb.exec(await migration("0009_inbox_scope.sql"));
+      await legacyDb.exec(await migration("0011_inbox_dispatch.sql"));
       const migrated = await legacyDb
         .prepare(
           "SELECT tenant_id, connection_id, environment, external_delivery_key, provider_event_id, state FROM polybill_inbox WHERE tenant_id = ? AND connection_id = ? AND environment = ? AND external_delivery_key = ?",

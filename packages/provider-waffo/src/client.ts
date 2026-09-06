@@ -1,6 +1,7 @@
 import {
   assertCredentialEnvironment,
   createHttpTransport,
+  providerIdempotencyKey,
   sha256Base64,
   signRsaSha256,
   utf8,
@@ -34,7 +35,13 @@ export async function waffoRequest(
     privateKey,
     utf8(`POST\n${path}\n${timestamp}\n${bodyHash}`),
   );
-  const response = await createHttpTransport({ fetch: context.fetch, provider: "waffo" }).send({
+  const key = await providerIdempotencyKey(context, "POST", path);
+  const response = await createHttpTransport({
+    fetch: context.fetch,
+    provider: "waffo",
+    deadline: context.deadline,
+    clock: context.clock,
+  }).send({
     url: `https://api.waffo.ai${path}`,
     method: "POST",
     headers: {
@@ -42,12 +49,10 @@ export async function waffoRequest(
       "X-Merchant-Id": merchantId,
       "X-Timestamp": timestamp,
       "X-Signature": signature,
-      ...(context.idempotencyKey === undefined
+      ...(key === undefined
         ? {}
         : {
-            "X-Idempotency-Key": await context.crypto.sha256(
-              utf8(`${merchantId}:${path}:${context.idempotencyKey}`),
-            ),
+            "X-Idempotency-Key": key,
           }),
     },
     body: serialized,

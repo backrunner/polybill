@@ -1,5 +1,7 @@
 import {
   createHttpTransport,
+  assertCredentialEnvironment,
+  providerIdempotencyKey,
   type HttpResponse,
   type ProviderContext,
 } from "@polybill/adapter-kit";
@@ -13,6 +15,7 @@ export async function paddleRequest(
   path: string,
   body?: unknown,
 ): Promise<HttpResponse> {
+  assertCredentialEnvironment(context, "paddle.authenticate");
   const apiKey = context.credentials.apiKey;
   if (apiKey === undefined || !matchesEnvironment(apiKey, context.connection.environment))
     throw new PolybillError("Paddle API key does not match the connection environment", {
@@ -26,16 +29,20 @@ export async function paddleRequest(
     context.connection.environment === "test"
       ? "https://sandbox-api.paddle.com"
       : "https://api.paddle.com";
-  const response = await createHttpTransport({ fetch: context.fetch, provider: "paddle" }).send({
+  const key = await providerIdempotencyKey(context, method, path);
+  const response = await createHttpTransport({
+    fetch: context.fetch,
+    provider: "paddle",
+    deadline: context.deadline,
+    clock: context.clock,
+  }).send({
     url: `${base}${path}`,
     method,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Paddle-Version": PADDLE_API_VERSION,
       Accept: "application/json",
-      ...(context.idempotencyKey === undefined
-        ? {}
-        : { "Idempotency-Key": context.idempotencyKey }),
+      ...(key === undefined ? {} : { "Idempotency-Key": key }),
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

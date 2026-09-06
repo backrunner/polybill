@@ -33,6 +33,74 @@ function context(fetch: typeof globalThis.fetch) {
 }
 
 describe("Stripe adapter contract", () => {
+  it("only replays checkout POST within the persisted safe idempotency window", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://api.stripe.com/v1/checkout/sessions",
+        response: Response.json({ id: "cs_recovered", status: "open" }),
+      },
+    ]);
+    const adapter = createStripeAdapter();
+    const ctx = context(scripted.fetch);
+    const command = {
+      orderId: parseId<"OrderId">("ord_striperecover", "ord"),
+      lines: [],
+      grossTotal: money("1000", "USD"),
+      total: money("1000", "USD"),
+      successUrl: "https://merchant.example/ok",
+      cancelUrl: "https://merchant.example/cancel",
+      metadata: {},
+    };
+    for (const attemptedAt of [undefined, parseIsoDateTime("2026-08-24T00:00:00.000Z")])
+      await expect(
+        adapter.checkout?.recoverByIdempotencyKey?.(ctx, ctx.idempotencyKey, command, attemptedAt),
+      ).rejects.toMatchObject({ code: "outcome_unknown" });
+    expect(scripted.requests).toHaveLength(0);
+    await expect(
+      adapter.checkout?.recoverByIdempotencyKey?.(
+        ctx,
+        ctx.idempotencyKey,
+        command,
+        ctx.clock.now(),
+      ),
+    ).resolves.toMatchObject({ value: { externalId: "cs_recovered" } });
+    scripted.assertConsumed();
+  });
+
+  it("scopes remote idempotency across connections using the same provider account", async () => {
+    const scripted = createScriptedFetch(
+      Array.from({ length: 3 }, () => ({
+        method: "POST",
+        url: "https://api.stripe.com/v1/checkout/sessions",
+        response: Response.json({ id: "cs_scope", status: "open" }),
+      })),
+    );
+    const adapter = createStripeAdapter();
+    const ctx = context(scripted.fetch);
+    const command = {
+      orderId: parseId<"OrderId">("ord_stripescope", "ord"),
+      lines: [],
+      grossTotal: money("1000", "USD"),
+      total: money("1000", "USD"),
+      successUrl: "https://merchant.example/ok",
+      cancelUrl: "https://merchant.example/cancel",
+      metadata: {},
+    };
+    await adapter.checkout?.create(ctx, command);
+    await adapter.checkout?.create(ctx, command);
+    await adapter.checkout?.create(
+      {
+        ...ctx,
+        connection: { ...ctx.connection, id: parseId<"ConnectionId">("conn_stripe02", "conn") },
+      },
+      command,
+    );
+    const keys = scripted.requests.map((request) => request.headers.get("idempotency-key"));
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
+    scripted.assertConsumed();
+  });
   it("creates an inline hosted checkout with pinned API version and idempotency", async () => {
     const scripted = createScriptedFetch([
       {
@@ -66,7 +134,7 @@ describe("Stripe adapter contract", () => {
     expect(result?.value.externalId).toBe("cs_test_123");
     const sent = scripted.requests[0];
     expect(sent?.headers.get("stripe-version")).toBe(STRIPE_API_VERSION);
-    expect(sent?.headers.get("idempotency-key")).toBe("stripe-checkout-0001");
+    expect(sent?.headers.get("idempotency-key")).toMatch(/^pb_[a-f0-9]{64}$/);
     expect(await sent?.clone().text()).toContain(
       "line_items%5B0%5D%5Bprice_data%5D%5Bunit_amount%5D=1250",
     );

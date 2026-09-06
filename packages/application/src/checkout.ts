@@ -39,6 +39,7 @@ import type { ApplicationStore, IdGenerator, Logger } from "./ports.js";
 import { AdHocCheckoutService, type CreateAdHocCheckoutCommand } from "./ad-hoc-checkout.js";
 import { prepareCheckoutDiscount } from "./checkout-discount.js";
 import { commitRemoteCheckout } from "./checkout-result.js";
+import { trackMutation } from "./mutation-attempt.js";
 
 export interface CreateCheckoutItem {
   readonly priceId: string;
@@ -99,7 +100,8 @@ export class CheckoutService {
     assertCheckoutItems(command.items);
     validatedRedirectUrl(command.successUrl);
     validatedRedirectUrl(command.cancelUrl);
-    const context = await this.#context(command.idempotencyKey);
+    const attempt = trackMutation(await this.#context(command.idempotencyKey));
+    const context = attempt.context;
     const capabilities = await this.#options.adapter.getCapabilities(context);
     this.#assertAvailable(capabilities, command.items.length, command.discountId !== undefined);
 
@@ -151,6 +153,7 @@ export class CheckoutService {
           context,
           command.idempotencyKey,
           prepared.providerCommand,
+          prepared.attemptedAt,
         );
         if (recovered === undefined) {
           throw new PolybillError("Provider has not exposed the checkout outcome yet", {
@@ -180,7 +183,8 @@ export class CheckoutService {
       if (
         (error instanceof PolybillError &&
           (error.code === "outcome_unknown" || error.code === "provider_unavailable")) ||
-        remoteObserved
+        remoteObserved ||
+        attempt.mayHaveMutated()
       ) {
         if (claim.kind === "claimed")
           await this.#options.store.markUnknown(
@@ -251,6 +255,7 @@ export class CheckoutService {
     const paymentId = parseId<"PaymentId">(this.#options.ids.next("pay"), "pay");
     return {
       orderId,
+      attemptedAt: this.#options.clock.now(),
       checkoutId,
       paymentId,
       commercialTermsRef: parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
@@ -331,6 +336,7 @@ export class CheckoutService {
   }
 
   async #context(idempotencyKey: IdempotencyKey): Promise<ProviderContext> {
+    await this.#options.store.bindConnection(this.#options.connection);
     const now = this.#options.clock.now();
     const credentials =
       typeof this.#options.credentials === "function"

@@ -13,7 +13,7 @@ export function creemResult<T extends { readonly externalId: string; readonly ra
       observedAt: context.clock.now(),
       ...(value.rawStatus === undefined ? {} : { rawStatus: value.rawStatus }),
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

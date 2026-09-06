@@ -1,6 +1,7 @@
 import {
   assertCredentialEnvironment,
   createHttpTransport,
+  providerIdempotencyKey,
   type HttpResponse,
   type ProviderContext,
 } from "@polybill/adapter-kit";
@@ -24,18 +25,19 @@ export async function lemonRequest(
       connectionId: context.connection.id,
       retryable: false,
     });
+  const key = await providerIdempotencyKey(context, method, path);
   const response = await createHttpTransport({
     fetch: context.fetch,
     provider: "lemonSqueezy",
+    deadline: context.deadline,
+    clock: context.clock,
   }).send({
     url: `https://api.lemonsqueezy.com/v1${path}`,
     method,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/vnd.api+json",
-      ...(context.idempotencyKey === undefined
-        ? {}
-        : { "Idempotency-Key": context.idempotencyKey }),
+      ...(key === undefined ? {} : { "Idempotency-Key": key }),
       ...(body === undefined ? {} : { "Content-Type": "application/vnd.api+json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

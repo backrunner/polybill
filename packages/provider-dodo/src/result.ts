@@ -13,7 +13,7 @@ export function dodoResult<T extends { readonly externalId: string; readonly raw
       observedAt: context.clock.now(),
       ...(value.rawStatus === undefined ? {} : { rawStatus: value.rawStatus }),
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

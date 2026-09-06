@@ -15,10 +15,9 @@ export function polarCapabilities(context: ProviderContext): CapabilitySnapshot 
     providerApiVersion: POLAR_API_VERSION,
     capabilities: {
       "checkout.hosted": native,
-      "checkout.multi_item": {
-        ...native,
-        constraints: { quantity: "one_per_product_except_seats" },
-      },
+      "checkout.multi_item": unsupportedCapability(
+        "Polar products are alternatives selected by the customer, not a multi-item cart",
+      ),
       "checkout.discount": unsupportedCapability(
         "Canonical discount redemption and net Order totals are not yet connected to Polar checkout",
         [

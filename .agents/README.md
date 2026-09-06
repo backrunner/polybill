@@ -1,6 +1,6 @@
 # Polybill 设计文档索引
 
-状态：架构基线，2026-08-25。当前仓库尚未进入实现阶段。
+状态：架构基线，2026-08-25；实现与支付安全复核更新至 2026-09-06。当前 provider adapters 均为 experimental。
 
 ## 产品定义
 
@@ -47,6 +47,7 @@ Billing 和 `x402-paysdk`。
 | --- | --- |
 | [REQUIREMENTS.md](./REQUIREMENTS.md) | 功能、非功能需求、范围和验收标准 |
 | [RESEARCH.md](./RESEARCH.md) | 官方资料、provider 能力矩阵、已知限制与待验证项 |
+| [PAYMENT_REVIEW_2026-09-06.md](./PAYMENT_REVIEW_2026-09-06.md) | 支付安全复核、现行官方协议证据与恢复边界 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 分层、调用链、可移植性、最终性与运行时设计 |
 | [MODULES.md](./MODULES.md) | monorepo 包结构、模块职责和依赖规则 |
 | [DATA_MODEL.md](./DATA_MODEL.md) | canonical entities、状态机、表和索引 |

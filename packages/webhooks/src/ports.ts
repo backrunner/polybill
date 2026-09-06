@@ -40,6 +40,7 @@ export type InboxClaim = "claimed" | "duplicate_applied" | "duplicate_processing
 
 export interface WebhookInboxStore {
   claim(record: InboxRecord): Promise<InboxClaim>;
+  markQueued(record: InboxRecord): Promise<void>;
   markApplied(record: InboxRecord, events: readonly CanonicalBillingEvent[]): Promise<void>;
   markFailed(record: InboxRecord, errorCode: string, retryable: boolean): Promise<void>;
 }

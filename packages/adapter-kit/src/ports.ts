@@ -101,6 +101,7 @@ export interface CheckoutProvider {
     context: ProviderContext,
     key: string,
     command: ProviderCheckoutCommand,
+    attemptedAt?: IsoDateTime,
   ): Promise<ProviderOperationResult<ProviderCheckoutSnapshot> | undefined>;
 }
 
@@ -151,6 +152,8 @@ export interface WebhookProvider {
     readonly secret: ResolvedWebhookSecret;
     readonly environment: Environment;
     readonly now: IsoDateTime;
+    /** Only a handler that persists a unique, scoped delivery key may delegate replay protection. */
+    readonly replayProtection?: "inbox";
   }): Promise<VerifiedProviderEvent>;
   decode(event: VerifiedProviderEvent): DecodedProviderEvent;
   map(

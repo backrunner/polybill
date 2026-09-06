@@ -34,7 +34,7 @@ function adapter(observed: Uint8Array[], mappedIds: (string | undefined)[] = [])
         }
         return {
           provider: "stripe",
-          environment: "test",
+          environment: input.environment,
           deliveryKey: input.headers.get("x-delivery-id") ?? "missing",
           providerEventId: "evt_fixture",
           rawBody: input.rawBody,
@@ -92,6 +92,100 @@ function request(body = '{\n  "type": "payment.succeeded"\n}', delivery = "deliv
 }
 
 describe("unified webhook contract", () => {
+  it("recovers queue dispatch failure and preserves applied state after a late failure", async () => {
+    const inbox = new MemoryWebhookInbox();
+    let fail = true;
+    const handler = createWebhookHandler({
+      adapters: new Map([["stripe", adapter([])]]),
+      inbox,
+      queue: {
+        send: async (record) => {
+          if (fail) {
+            fail = false;
+            throw new Error("queue down");
+          }
+          await inbox.send(record);
+        },
+      },
+      resolver: {
+        resolve: async () => ({
+          tenantId,
+          connection,
+          secret: { active: "fixture-secret", activeKeyId: "key-1" },
+        }),
+      },
+      now: () => "2026-08-25T00:00:00.000Z",
+    });
+    expect((await handler(request())).status).toBe(503);
+    expect(inbox.queued).toHaveLength(0);
+    expect((await handler(request())).status).toBe(202);
+    expect(inbox.queued).toHaveLength(1);
+    expect((await handler(request())).status).toBe(202);
+    expect(inbox.queued).toHaveLength(1);
+    const record = inbox.queued[0];
+    if (record === undefined) throw new Error("missing queue record");
+    await inbox.markApplied(record, []);
+    await inbox.markFailed(record, "queue_dispatch_failed", true);
+    expect((await handler(request())).status).toBe(204);
+    expect(inbox.state(connection.id, record.deliveryKey)).toBe("applied");
+  });
+
+  it("recovers an inbox claim abandoned before queue dispatch after its lease expires", async () => {
+    const inbox = new MemoryWebhookInbox();
+    const verified = await adapter([]).webhooks.verify({
+      rawBody: new TextEncoder().encode("{}"),
+      headers: new Headers({ "x-test-signature": "fixture-secret", "x-delivery-id": "delivery-1" }),
+      secret: { active: "fixture-secret", activeKeyId: "key-1" },
+      environment: "test",
+      now: parseIsoDateTime("2026-08-25T00:00:00.000Z"),
+    });
+    await inbox.claim({
+      tenantId,
+      connection,
+      deliveryKey: "delivery-1",
+      receivedAt: verified.verifiedAt,
+      verified,
+    });
+    const handler = createWebhookHandler({
+      adapters: new Map([["stripe", adapter([])]]),
+      inbox,
+      queue: inbox,
+      resolver: {
+        resolve: async () => ({
+          tenantId,
+          connection,
+          secret: { active: "fixture-secret", activeKeyId: "key-1" },
+        }),
+      },
+      now: () => "2026-08-25T00:01:01.000Z",
+    });
+    expect((await handler(request("{}"))).status).toBe(202);
+    expect(inbox.queued).toHaveLength(1);
+  });
+
+  it("returns 5xx when inbox persistence fails", async () => {
+    class UnavailableInbox extends MemoryWebhookInbox {
+      override async claim(): Promise<never> {
+        throw new Error("database down");
+      }
+    }
+    const inbox = new UnavailableInbox();
+    const handler = createWebhookHandler({
+      adapters: new Map([["stripe", adapter([])]]),
+      inbox,
+      queue: inbox,
+      resolver: {
+        resolve: async () => ({
+          tenantId,
+          connection,
+          secret: { active: "fixture-secret", activeKeyId: "key-1" },
+        }),
+      },
+    });
+    expect((await handler(request())).status).toBe(503);
+    expect(inbox.queued).toHaveLength(0);
+  });
+
   it("verifies raw bytes, claims the inbox, and applies asynchronously", async () => {
     const observed: Uint8Array[] = [];
     const mappedIds: (string | undefined)[] = [];
@@ -189,6 +283,10 @@ describe("unified webhook contract", () => {
               : tenantId,
           connection: {
             ...connection,
+            tenantId:
+              headers.get("x-tenant") === "other"
+                ? parseId<"TenantId">("ten_webhook02", "ten")
+                : tenantId,
             environment: headers.get("x-env") === "live" ? "live" : "test",
           },
           secret: { active: "fixture-secret", activeKeyId: "key-1" },

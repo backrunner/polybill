@@ -19,6 +19,17 @@ export const lemonWebhooks: WebhookProvider = {
       input.secret.previous !== undefined &&
       (await verifyHmacHex(input.secret.previous, input.rawBody, signature));
     if (!active && !previous) throw signatureError("lemonSqueezy");
+    const root = decodeRoot(input.rawBody);
+    const meta = object(root.meta, "lemonSqueezy", "lemonSqueezy.webhook.verify");
+    if (meta.test_mode !== undefined && meta.test_mode !== (input.environment === "test"))
+      throw signatureError("lemonSqueezy");
+    const data = object(root.data, "lemonSqueezy", "lemonSqueezy.webhook.verify");
+    const attributes = object(data.attributes, "lemonSqueezy", "lemonSqueezy.webhook.verify");
+    if (
+      attributes.test_mode !== undefined &&
+      attributes.test_mode !== (input.environment === "test")
+    )
+      throw signatureError("lemonSqueezy");
     const digest = await sha256(input.rawBody);
     const keyId = active ? input.secret.activeKeyId : input.secret.previousKeyId;
     return {
@@ -40,6 +51,7 @@ export const lemonWebhooks: WebhookProvider = {
     return {
       type: stringField(meta, "event_name", "lemonSqueezy", "lemonSqueezy.webhook.decode"),
       externalIds: {
+        event: event.deliveryKey,
         object: stringField(data, "id", "lemonSqueezy", "lemonSqueezy.webhook.decode"),
       },
       ...(occurredAt === undefined ? {} : { occurredAt: parseIsoDateTime(occurredAt) }),
@@ -102,7 +114,7 @@ function mappingFor(
     order_refunded: { type: "refund.succeeded.v1", aggregate: "order" },
     subscription_created: { type: "subscription.created.v1", aggregate: "subscription" },
     subscription_updated: { type: "subscription.changed.v1", aggregate: "subscription" },
-    subscription_cancelled: { type: "subscription.canceled.v1", aggregate: "subscription" },
+    subscription_cancelled: { type: "subscription.changed.v1", aggregate: "subscription" },
     subscription_expired: { type: "subscription.canceled.v1", aggregate: "subscription" },
   };
   return map[type];

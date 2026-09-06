@@ -1,5 +1,7 @@
 import {
   createHttpTransport,
+  assertCredentialEnvironment,
+  providerIdempotencyKey,
   type HttpResponse,
   type ProviderContext,
 } from "@polybill/adapter-kit";
@@ -14,6 +16,7 @@ export async function stripeRequest(
   path: string,
   body?: URLSearchParams,
 ): Promise<HttpResponse> {
+  assertCredentialEnvironment(context, "stripe.authenticate");
   const apiKey = context.credentials.apiKey;
   if (apiKey === undefined || !matchesEnvironment(apiKey, context.connection.environment)) {
     throw new PolybillError("Stripe credential does not match the connection environment", {
@@ -24,15 +27,19 @@ export async function stripeRequest(
       retryable: false,
     });
   }
-  const response = await createHttpTransport({ fetch: context.fetch, provider: "stripe" }).send({
+  const key = await providerIdempotencyKey(context, method, path);
+  const response = await createHttpTransport({
+    fetch: context.fetch,
+    provider: "stripe",
+    deadline: context.deadline,
+    clock: context.clock,
+  }).send({
     url: `${API}${path}`,
     method,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Stripe-Version": STRIPE_API_VERSION,
-      ...(context.idempotencyKey === undefined
-        ? {}
-        : { "Idempotency-Key": context.idempotencyKey }),
+      ...(key === undefined ? {} : { "Idempotency-Key": key }),
       ...(body === undefined ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
     },
     ...(body === undefined ? {} : { body }),
@@ -42,7 +49,7 @@ export async function stripeRequest(
 }
 
 function matchesEnvironment(key: string, environment: "test" | "live"): boolean {
-  return environment === "test" ? key.startsWith("sk_test_") : key.startsWith("sk_live_");
+  return environment === "test" ? /^(sk|rk)_test_/.test(key) : /^(sk|rk)_live_/.test(key);
 }
 
 function stripeError(status: number, context: ProviderContext): PolybillError {

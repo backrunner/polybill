@@ -8,19 +8,17 @@ import {
   PolybillError,
   addMoney,
   checkCommercialPolicy,
-  money,
   multiplyMoney,
   parseId,
   parseIsoDateTime,
-  transitionPayment,
   type CustomerId,
   type IdempotencyKey,
   type Money,
-  type Order,
   type PriceModel,
 } from "@polybill/core";
 import {
   fixedUnitAmount,
+  assertCheckoutItems,
   invalidCheckout,
   parseStoredCheckoutResult,
   parseStoredPreparedCheckout,
@@ -30,6 +28,8 @@ import {
 } from "./checkout-helpers.js";
 import type { CheckoutServiceOptions, CreateCheckoutResult } from "./checkout.js";
 import type { IdempotencyScope } from "./ports.js";
+import { trackMutation } from "./mutation-attempt.js";
+import { commitRemoteCheckout } from "./checkout-result.js";
 
 export interface CreateAdHocCheckoutItem {
   readonly skuId: ProviderCheckoutCommand["lines"][number]["skuId"];
@@ -58,7 +58,8 @@ export class AdHocCheckoutService {
 
   async create(command: CreateAdHocCheckoutCommand): Promise<CreateCheckoutResult> {
     assertInput(command);
-    const context = await this.#context(command.idempotencyKey);
+    const attempt = trackMutation(await this.#context(command.idempotencyKey));
+    const context = attempt.context;
     await this.#assertCapability(context, command.items.length);
     const scope: IdempotencyScope = {
       tenantId: this.#options.tenantId,
@@ -89,6 +90,7 @@ export class AdHocCheckoutService {
           context,
           command.idempotencyKey,
           prepared.providerCommand,
+          prepared.attemptedAt,
         );
         if (recovered === undefined) throw commandError("outcome_unknown", this.#options);
         remoteObserved = true;
@@ -103,7 +105,8 @@ export class AdHocCheckoutService {
       if (
         (error instanceof PolybillError &&
           (error.code === "outcome_unknown" || error.code === "provider_unavailable")) ||
-        remoteObserved
+        remoteObserved ||
+        attempt.mayHaveMutated()
       ) {
         if (claim.kind === "claimed")
           await this.#options.store.markUnknown(
@@ -147,6 +150,7 @@ export class AdHocCheckoutService {
   }
 
   async #context(idempotencyKey: IdempotencyKey): Promise<ProviderContext> {
+    await this.#options.store.bindConnection(this.#options.connection);
     const now = this.#options.clock.now();
     return {
       tenantId: this.#options.tenantId,
@@ -172,68 +176,7 @@ export class AdHocCheckoutService {
     prepared: StoredPreparedCheckout,
     remote: ProviderOperationResult<ProviderCheckoutSnapshot>,
   ): Promise<CreateCheckoutResult> {
-    const now = this.#options.clock.now();
-    const order: Order = {
-      id: prepared.orderId,
-      ...(prepared.providerCommand.customerId === undefined
-        ? {}
-        : { customerId: prepared.providerCommand.customerId }),
-      lines: prepared.lines.map((line) => ({
-        skuId: line.skuId,
-        price: line.price,
-        quantity: line.quantity,
-        subtotal: multiplyMoney(line.unitAmount, line.quantity),
-      })),
-      grossTotal: prepared.providerCommand.total,
-      discounts: [],
-      discountTotal: money("0", prepared.providerCommand.total.currency),
-      total: prepared.providerCommand.total,
-      paymentStatus: "pending",
-      fulfillmentStatus: "unfulfilled",
-      commercialTermsRef:
-        prepared.commercialTermsRef ?? parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
-      createdAt: now,
-    };
-    const pending = {
-      id: prepared.paymentId,
-      orderId: prepared.orderId,
-      status: "pending" as const,
-      amount: order.total,
-      refundedAmount: money("0", order.total.currency),
-      evidence: [],
-    };
-    const result: CreateCheckoutResult = {
-      checkout: {
-        id: prepared.checkoutId,
-        orderId: prepared.orderId,
-        status: remote.value.status === "complete" ? "complete" : "open",
-        ...(remote.value.url === undefined ? {} : { url: remote.value.url }),
-        ...(remote.value.expiresAt === undefined ? {} : { expiresAt: remote.value.expiresAt }),
-      },
-      order,
-      payment:
-        remote.value.status === "complete" ? transitionPayment(pending, "succeeded") : pending,
-      provider: this.#options.connection.provider,
-      warnings: remote.warnings,
-    };
-    await this.#options.store.commitCheckout({
-      tenantId: this.#options.tenantId,
-      connectionId: this.#options.connection.id,
-      provider: this.#options.connection.provider,
-      externalCheckoutId: remote.value.externalId,
-      ...(remote.value.externalPaymentId === undefined
-        ? {}
-        : { externalPaymentId: remote.value.externalPaymentId }),
-      checkout: result.checkout,
-      order,
-      payment: result.payment,
-      evidenceId:
-        prepared.evidenceId ?? parseId<"EvidenceId">(this.#options.ids.next("evi"), "evi"),
-      evidence: remote.evidence,
-      occurredAt: now,
-    });
-    await this.#options.store.complete(scope, leaseToken, result);
-    return result;
+    return commitRemoteCheckout(this.#options, scope, leaseToken, prepared, remote);
   }
 }
 
@@ -255,6 +198,7 @@ function prepare(
   const orderId = parseId<"OrderId">(options.ids.next("ord"), "ord");
   return {
     orderId,
+    attemptedAt: options.clock.now(),
     checkoutId: parseId<"CheckoutId">(options.ids.next("chk"), "chk"),
     paymentId: parseId<"PaymentId">(options.ids.next("pay"), "pay"),
     commercialTermsRef: parseId<"EvidenceId">(options.ids.next("evi"), "evi"),
@@ -275,8 +219,7 @@ function prepare(
 }
 
 function assertInput(command: CreateAdHocCheckoutCommand): void {
-  if (command.items.length === 0 || command.items.some((item) => item.quantity < 1))
-    throw invalidCheckout("Checkout quantities must be positive");
+  assertCheckoutItems(command.items);
   if (command.items.some((item) => item.persistence !== "session"))
     throw invalidCheckout("Reusable ad hoc prices must be created through the catalog service");
   validatedRedirectUrl(command.successUrl);

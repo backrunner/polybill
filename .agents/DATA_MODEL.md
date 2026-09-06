@@ -110,6 +110,8 @@ PAN、CVC、银行凭据或 wallet token。
 
 状态：`open | complete | expired | canceled`。它是短期交互对象，不等价于 Order 或 Payment。
 保存 success/cancel URL、line item snapshot、customer ref、provider URL 和 expiry。
+创建/恢复 CheckoutSession 即使返回 complete 也不推进 Payment；Payment success 需要独立权威
+支付证据。详见 [2026-09-06 安全复核](./PAYMENT_REVIEW_2026-09-06.md)。
 
 ### Order
 

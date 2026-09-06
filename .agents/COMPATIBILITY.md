@@ -26,6 +26,16 @@
 
 ## Capability policy
 
+- [2026-09-06 payment review](./PAYMENT_REVIEW_2026-09-06.md) records the latest source review and
+  corrected failure paths. Polar multi-item checkout is unsupported because its products are
+  alternatives, not cart lines. Dodo, Polar and Creem checkout POST replay is not advertised as
+  recovery. Stripe replay is limited to a persisted attempt younger than 23 hours.
+- Checkout completion alone never marks a Payment succeeded. Standalone payment/receipt evidence
+  remains necessary, including when checkout read-back reports complete.
+- Host stores must implement immutable `bindConnection` and inbox `markQueued`; apply D1 migration
+  `0011_inbox_dispatch.sql` before deploying this version. Register existing connection identities
+  before allowing commands against pre-upgrade mappings.
+
 - Stripe discount create/read/redeem has an offline transport and amount read-back proof.
 - Dodo and Polar canonical checkout discounts remain `unsupported` until external discount IDs and
   final net amount can be proven end to end.

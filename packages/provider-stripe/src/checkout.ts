@@ -8,7 +8,7 @@ import {
   type ProviderContext,
   type ProviderOperationResult,
 } from "@polybill/adapter-kit";
-import { money, parseIsoDateTime } from "@polybill/core";
+import { money, parseIsoDateTime, PolybillError } from "@polybill/core";
 import { stripeRequest } from "./client.js";
 
 export const stripeCheckout: CheckoutProvider = {
@@ -29,7 +29,21 @@ export const stripeCheckout: CheckoutProvider = {
       ),
     );
   },
-  async recoverByIdempotencyKey(context, _key, command) {
+  async recoverByIdempotencyKey(context, key, command, attemptedAt) {
+    const age =
+      attemptedAt === undefined ? NaN : Date.parse(context.clock.now()) - Date.parse(attemptedAt);
+    if (
+      context.idempotencyKey !== key ||
+      !Number.isFinite(age) ||
+      age < 0 ||
+      age >= 23 * 60 * 60 * 1000
+    )
+      throw new PolybillError("Stripe checkout recovery is outside the safe idempotency window", {
+        code: "outcome_unknown",
+        operation: "stripe.checkout.recover",
+        provider: "stripe",
+        retryable: false,
+      });
     return create(context, command);
   },
 };

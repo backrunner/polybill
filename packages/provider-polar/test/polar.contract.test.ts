@@ -1,10 +1,60 @@
 import { createWebCryptoPort, hmacSha256, joinBytes, utf8 } from "@polybill/adapter-kit";
-import { parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
+import { money, parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
 import { createScriptedFetch, VirtualClock } from "@polybill/testing";
 import { describe, expect, it } from "vitest";
 import { createPolarAdapter } from "../src/index.js";
 
 describe("Polar webhook contract", () => {
+  it("rejects alternative products presented as a canonical multi-item cart before transport", async () => {
+    const scripted = createScriptedFetch([]);
+    const adapter = createPolarAdapter();
+    const ctx = context(scripted.fetch);
+    expect((await adapter.getCapabilities(ctx)).capabilities["checkout.multi_item"]).toMatchObject({
+      support: "unsupported",
+    });
+    const line = {
+      skuId: parseId<"SkuId">("sku_polarreview", "sku"),
+      quantity: 1,
+      price: { kind: "one_time" as const, unit: money("1000", "USD") },
+      unitAmount: money("1000", "USD"),
+      externalPriceId: "prod_one",
+    };
+    await expect(
+      adapter.checkout?.create(ctx, {
+        orderId: parseId<"OrderId">("ord_polarreview", "ord"),
+        lines: [line, { ...line, externalPriceId: "prod_two" }],
+        grossTotal: money("2000", "USD"),
+        total: money("2000", "USD"),
+        successUrl: "https://merchant.example/ok",
+        cancelUrl: "https://merchant.example/cancel",
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    expect(scripted.requests).toHaveLength(0);
+    expect(adapter.checkout?.recoverByIdempotencyKey).toBeUndefined();
+  });
+
+  it("preserves active access for scheduled cancellation until revocation", async () => {
+    const adapter = createPolarAdapter();
+    const ctx = context(globalThis.fetch);
+    const mapContext = {
+      tenantId: ctx.tenantId,
+      connection: ctx.connection,
+      observedAt: ctx.clock.now(),
+      lookup: { findCanonicalId: async () => "sub_canonical" },
+    };
+    for (const [type, expected] of [
+      ["subscription.canceled", "subscription.changed.v1"],
+      ["subscription.revoked", "subscription.canceled.v1"],
+    ]) {
+      if (type === undefined) throw new Error("missing fixture");
+      const events = await adapter.webhooks.map(
+        { type, externalIds: { object: "sub_remote", event: type }, payload: {} },
+        mapContext,
+      );
+      expect(events[0]?.type).toBe(expected);
+    }
+  });
   it("does not claim discounts before canonical net totals are connected", async () => {
     const capability = (await createPolarAdapter().getCapabilities(context(globalThis.fetch)))
       .capabilities["checkout.discount"];

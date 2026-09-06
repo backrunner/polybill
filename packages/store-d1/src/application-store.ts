@@ -12,6 +12,7 @@ import type {
 } from "@polybill/application";
 import type {
   CheckoutSession,
+  ConnectionRef,
   Discount,
   DiscountId,
   DiscountRedemptionId,
@@ -19,6 +20,7 @@ import type {
   Price,
   TenantId,
 } from "@polybill/core";
+import { PolybillError } from "@polybill/core";
 import type { D1DatabaseLike, D1Result } from "./d1.js";
 import { decodeCheckout, decodePrice, parseStored } from "./application-codecs.js";
 import { commitCheckoutToD1 } from "./checkout-commit.js";
@@ -76,6 +78,41 @@ export class D1ApplicationStore implements ApplicationStore {
       recoveryContext: parseStored(row.recovery_context, "recovery context"),
       ...(row.evidence === null ? {} : { evidence: row.evidence }),
     };
+  }
+
+  async bindConnection(connection: ConnectionRef): Promise<void> {
+    await this.#db
+      .prepare(
+        "INSERT INTO polybill_connections (tenant_id, connection_id, provider, environment, account_ref, configuration) VALUES (?, ?, ?, ?, ?, '{}') ON CONFLICT(tenant_id, connection_id) DO NOTHING",
+      )
+      .bind(
+        connection.tenantId,
+        connection.id,
+        connection.provider,
+        connection.environment,
+        connection.accountRef ?? null,
+      )
+      .run();
+    const existing = await this.#db
+      .prepare(
+        "SELECT provider, environment, account_ref FROM polybill_connections WHERE tenant_id = ? AND connection_id = ?",
+      )
+      .bind(connection.tenantId, connection.id)
+      .first<{ provider: string; environment: string; account_ref: string | null }>();
+    if (
+      existing === null ||
+      existing.provider !== connection.provider ||
+      existing.environment !== connection.environment ||
+      existing.account_ref !== (connection.accountRef ?? null)
+    )
+      throw new PolybillError(
+        "Connection identity is already bound to a different provider, environment or account",
+        {
+          code: "conflict",
+          operation: "connection.bind",
+          retryable: false,
+        },
+      );
   }
 
   async saveRecoveryContext(

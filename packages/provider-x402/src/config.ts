@@ -21,9 +21,21 @@ export interface X402AdapterOptions {
 }
 
 export function assertX402Options(options: X402AdapterOptions): void {
+  if (
+    options.settlement.kind !== "fixed" ||
+    options.settlement.pricingCurrency !== "USD" ||
+    options.settlement.acceptPegRisk !== true
+  )
+    throw new TypeError("x402 fixed settlement requires explicit USD peg-risk acceptance");
   const gateway = new URL(options.gateway);
   if (gateway.username !== "" || gateway.password !== "")
     throw new TypeError("x402 gateway must not include credentials");
+  if (
+    (gateway.pathname !== "/" && gateway.pathname !== "") ||
+    gateway.search !== "" ||
+    gateway.hash !== ""
+  )
+    throw new TypeError("x402 gateway must be an origin without a path, query or fragment");
   if (gateway.protocol !== "https:" && !isLoopback(gateway))
     throw new TypeError("x402 gateway must use HTTPS outside local development");
   if (!/^[1-9][0-9]*$/.test(options.settlement.atomicPerMinor))

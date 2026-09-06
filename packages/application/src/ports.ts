@@ -1,6 +1,7 @@
 import type {
   CheckoutSession,
   ConnectionId,
+  ConnectionRef,
   DiscountRedemptionId,
   EvidenceId,
   IdempotencyKey,
@@ -140,7 +141,9 @@ export interface ApplicationStore
     CanonicalResourceStore,
     ReconciliationStore,
     DiscountStore,
-    DiscountRedemptionStore {}
+    DiscountRedemptionStore {
+  bindConnection(connection: ConnectionRef): Promise<void>;
+}
 
 export interface IdGenerator {
   next(prefix: string): string;

@@ -1,10 +1,53 @@
 import { createWebCryptoPort, hmacSha256, utf8 } from "@polybill/adapter-kit";
-import { parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
+import { money, parseId, parseIdempotencyKey, parseIsoDateTime } from "@polybill/core";
 import { createScriptedFetch, VirtualClock } from "@polybill/testing";
 import { describe, expect, it } from "vitest";
 import { createCreemAdapter } from "../src/index.js";
 
 describe("Creem webhook contract", () => {
+  it("encodes bounded numeric custom prices and does not replay tracking references", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://test-api.creem.io/v1/checkouts",
+        response: Response.json({
+          id: "chk_custom",
+          status: "pending",
+          checkout_url: "https://checkout.creem.io/custom",
+        }),
+      },
+    ]);
+    const adapter = createCreemAdapter();
+    const command = {
+      orderId: parseId<"OrderId">("ord_creemcustom", "ord"),
+      lines: [
+        {
+          skuId: parseId<"SkuId">("sku_creemcustom", "sku"),
+          quantity: 3,
+          price: { kind: "custom" as const },
+          unitAmount: money("1500", "USD"),
+          externalPriceId: "prod_custom",
+        },
+      ],
+      grossTotal: money("4500", "USD"),
+      total: money("4500", "USD"),
+      successUrl: "https://merchant.example/ok",
+      cancelUrl: "https://merchant.example/cancel",
+      metadata: {},
+    };
+    await adapter.checkout?.create(context(scripted.fetch), command);
+    expect(await scripted.requests[0]?.json()).toMatchObject({ units: 3, custom_price: 1500 });
+    for (const amount of ["99", "100000000"])
+      await expect(
+        adapter.checkout?.create(context(scripted.fetch), {
+          ...command,
+          lines: command.lines.map((line) => ({ ...line, unitAmount: money(amount, "USD") })),
+        }),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(scripted.requests).toHaveLength(1);
+    expect(adapter.checkout?.recoverByIdempotencyKey).toBeUndefined();
+    scripted.assertConsumed();
+  });
   it("does not claim synchronous subscription creation", async () => {
     const capability = (await createCreemAdapter().getCapabilities(context(globalThis.fetch)))
       .capabilities["subscription.create"];

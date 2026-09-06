@@ -8,7 +8,17 @@ export async function canonicalWebhookEvent(input: {
   readonly aggregateType: string;
   readonly aggregateId: string;
 }): Promise<CanonicalBillingEvent> {
-  const source = `${input.event.externalIds.event ?? input.event.type}:${input.type}:${input.aggregateId}`;
+  const source = JSON.stringify([
+    input.context.tenantId,
+    input.context.connection.id,
+    input.context.connection.environment,
+    input.context.connection.provider,
+    input.event.externalIds.event ?? input.event.payload,
+    input.event.type,
+    input.type,
+    input.aggregateType,
+    input.aggregateId,
+  ]);
   const digest = Array.from(
     new Uint8Array(
       await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(source)),

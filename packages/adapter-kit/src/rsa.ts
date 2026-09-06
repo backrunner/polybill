@@ -11,6 +11,7 @@ export async function signRsaSha256(privateKeyPem: string, message: Uint8Array):
     false,
     ["sign"],
   );
+  assertStrongRsa(key);
   return encodeBase64(
     new Uint8Array(await globalThis.crypto.subtle.sign(RSA_ALGORITHM.name, key, copy(message))),
   );
@@ -29,6 +30,7 @@ export async function verifyRsaSha256(
       false,
       ["verify"],
     );
+    assertStrongRsa(key);
     return globalThis.crypto.subtle.verify(
       RSA_ALGORITHM.name,
       key,
@@ -68,9 +70,20 @@ function publicKeyDer(pem: string): ArrayBuffer {
 }
 
 function pemBytes(value: string): Uint8Array {
+  if (value.length > 32_768) throw new TypeError("PEM key exceeds the size limit");
   const base64 = value.replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s+/g, "");
   if (base64.length === 0) throw new TypeError("PEM key is empty");
   return decodeBase64(base64);
+}
+
+function assertStrongRsa(key: CryptoKey): void {
+  const algorithm = key.algorithm;
+  if (
+    !("modulusLength" in algorithm) ||
+    typeof algorithm.modulusLength !== "number" ||
+    algorithm.modulusLength < 2048
+  )
+    throw new TypeError("RSA keys must have at least 2048 bits");
 }
 
 function sequence(...values: readonly Uint8Array[]): Uint8Array {

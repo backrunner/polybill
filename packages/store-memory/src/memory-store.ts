@@ -8,7 +8,14 @@ import type {
   ReconciliationTarget,
   ReserveDiscountResult,
 } from "@polybill/application";
-import type { CheckoutSession, DiscountRedemptionId, Price, TenantId } from "@polybill/core";
+import {
+  PolybillError,
+  type ConnectionRef,
+  type CheckoutSession,
+  type DiscountRedemptionId,
+  type Price,
+  type TenantId,
+} from "@polybill/core";
 import { MemoryDiscountStore } from "./discount-store.js";
 
 interface IdempotencyRecord {
@@ -21,6 +28,7 @@ interface IdempotencyRecord {
 }
 
 export class MemoryStore extends MemoryDiscountStore implements ApplicationStore {
+  readonly #connections = new Map<string, ConnectionRef>();
   readonly #idempotency = new Map<string, IdempotencyRecord>();
   readonly #prices = new Map<string, Price>();
   readonly #checkouts = new Map<string, CheckoutSession>();
@@ -32,6 +40,26 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
   readonly #discountReservations = new Map<string, DiscountReservation>();
   readonly #commits: CheckoutCommit[] = [];
   #leaseSequence = 0;
+
+  async bindConnection(connection: ConnectionRef): Promise<void> {
+    const key = JSON.stringify([connection.tenantId, connection.id]);
+    const existing = this.#connections.get(key);
+    if (
+      existing !== undefined &&
+      (existing.provider !== connection.provider ||
+        existing.environment !== connection.environment ||
+        existing.accountRef !== connection.accountRef)
+    )
+      throw new PolybillError(
+        "Connection identity is already bound to a different provider, environment or account",
+        {
+          code: "conflict",
+          operation: "connection.bind",
+          retryable: false,
+        },
+      );
+    this.#connections.set(key, globalThis.structuredClone(connection));
+  }
 
   seedPrice(tenantId: TenantId, price: Price): void {
     this.#prices.set(`${tenantId}:${price.id}`, globalThis.structuredClone(price));

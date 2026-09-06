@@ -16,6 +16,7 @@ import {
 } from "@polybill/core";
 import { stableStringify } from "./checkout-helpers.js";
 import type { ApplicationStore, IdGenerator, Logger } from "./ports.js";
+import { trackMutation } from "./mutation-attempt.js";
 
 export interface ResourceRuntimeOptions {
   readonly tenantId: TenantId;
@@ -35,10 +36,20 @@ export class ResourceRuntime {
   readonly options: ResourceRuntimeOptions;
 
   constructor(options: ResourceRuntimeOptions) {
+    if (
+      options.tenantId !== options.connection.tenantId ||
+      options.adapter.descriptor.name !== options.connection.provider
+    )
+      throw new PolybillError("Connection does not match the requested tenant and provider", {
+        code: "invalid_request",
+        operation: "resource.initialize",
+        retryable: false,
+      });
     this.options = options;
   }
 
   async context(idempotencyKey?: IdempotencyKey): Promise<ProviderContext> {
+    await this.options.store.bindConnection(this.options.connection);
     const credentials =
       typeof this.options.credentials === "function"
         ? await this.options.credentials()
@@ -88,6 +99,7 @@ export class ResourceRuntime {
     const payloadHash = await this.options.crypto.sha256(
       new TextEncoder().encode(stableStringify(input.payload)),
     );
+    const attempt = trackMutation(await this.context(input.key));
     const claim = await this.options.store.claim(scope, payloadHash);
     if (claim.kind === "replay") return input.decodeReplay(claim.result);
     if (claim.kind === "conflict")
@@ -96,16 +108,24 @@ export class ResourceRuntime {
       throw commandError("conflict", input.operation, this.options.connection, true);
     if (claim.kind === "outcome_unknown")
       throw commandError("outcome_unknown", input.operation, this.options.connection, true);
+    let executed = false;
     try {
-      const result = await input.execute(await this.context(input.key));
+      const result = await input.execute(attempt.context);
+      executed = true;
       await this.options.store.complete(scope, claim.leaseToken, result);
       return result;
     } catch (error) {
       if (
-        error instanceof PolybillError &&
-        (error.code === "outcome_unknown" || error.code === "provider_unavailable")
+        attempt.mayHaveMutated() ||
+        executed ||
+        (error instanceof PolybillError &&
+          (error.code === "outcome_unknown" || error.code === "provider_unavailable"))
       )
-        await this.options.store.markUnknown(scope, claim.leaseToken, error.evidenceRef);
+        await this.options.store.markUnknown(
+          scope,
+          claim.leaseToken,
+          error instanceof PolybillError ? error.evidenceRef : undefined,
+        );
       else await this.options.store.release(scope, claim.leaseToken);
       throw error;
     }

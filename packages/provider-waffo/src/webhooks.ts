@@ -3,6 +3,7 @@ import {
   joinBytes,
   object,
   optionalString,
+  rawDeliveryKey,
   signatureError,
   stringField,
   utf8,
@@ -45,7 +46,7 @@ export const waffoWebhooks: WebhookProvider = {
     return {
       provider: "waffo",
       environment: input.environment,
-      deliveryKey: `waffo:${id}`,
+      deliveryKey: await rawDeliveryKey("waffo", input.rawBody),
       providerEventId: id,
       rawBody: input.rawBody,
       verifiedAt: input.now,
@@ -58,7 +59,7 @@ export const waffoWebhooks: WebhookProvider = {
     return {
       type: stringField(root, "eventType", "waffo", "waffo.webhook.decode"),
       externalIds: {
-        event: stringField(root, "id", "waffo", "waffo.webhook.decode"),
+        event: event.deliveryKey,
         object: stringField(root, "eventId", "waffo", "waffo.webhook.decode"),
         ...(optionalString(payload, "orderId") === undefined
           ? {}

@@ -58,12 +58,28 @@ export class RefundService {
         const remaining = subtractMoney(payment.amount, payment.refundedAmount);
         if (compareMoney(remaining, moneyZero(payment.amount)) === 0)
           throw refundInvalid("Payment has no refundable balance", "refund.create");
+        if (
+          command.amount !== undefined &&
+          (command.amount.currency !== payment.amount.currency ||
+            BigInt(command.amount.amount) <= 0 ||
+            BigInt(command.amount.amount) > BigInt(remaining.amount))
+        )
+          throw new PolybillError(
+            "Refund amount must match the payment currency and remaining balance",
+            {
+              code: "invalid_request",
+              operation: "refund.create",
+              retryable: false,
+            },
+          );
         const remote = await port(context, {
           externalPaymentId,
           ...(command.amount === undefined ? {} : { amount: command.amount }),
           ...(command.reason === undefined ? {} : { reason: command.reason }),
           metadata: command.metadata ?? {},
         });
+        if (remote.value.externalPaymentId !== externalPaymentId)
+          throw refundInvalid("Provider refund belongs to a different payment", "refund.decode");
         if (remote.value.status === "unknown")
           throw new PolybillError("Provider returned an unknown refund status", {
             code: "provider_response_invalid",
@@ -144,6 +160,20 @@ export class RefundService {
           "refund.refresh",
         );
         const remote = await port(context, externalId);
+        const expectedPaymentId = await this.#runtime.options.store.getExternalId(
+          this.#runtime.options.tenantId,
+          this.#runtime.options.connection.id,
+          "payment",
+          current.paymentId,
+        );
+        if (
+          remote.value.externalId !== externalId ||
+          remote.value.externalPaymentId !== expectedPaymentId
+        )
+          throw refundInvalid(
+            "Provider refund identity does not match its mapping",
+            "refund.refresh",
+          );
         if (remote.value.status === "unknown")
           throw new PolybillError("Provider returned an unknown refund status", {
             code: "provider_response_invalid",

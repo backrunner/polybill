@@ -6,7 +6,7 @@ import {
   type PaymentSettledNotify,
 } from "x402-paysdk/merchant";
 import { InjectedMerchantClient } from "./client.js";
-import type { X402AdapterOptions } from "./config.js";
+import { assertX402Options, type X402AdapterOptions } from "./config.js";
 
 export interface ExpectedX402Settlement {
   readonly refId: string;
@@ -36,6 +36,7 @@ export async function verifyX402Settlement(
   notify: PaymentSettledNotify,
   expected: ExpectedX402Settlement,
 ): Promise<X402SettlementResult> {
+  assertX402Options(options);
   assertNotifyTuple(context, options, notify, expected);
   if (notify.signedReceipt === undefined || notify.receipt === undefined)
     return { status: "provisional", reason: "receipt_missing", txHash: notify.txHash };
@@ -54,9 +55,10 @@ export async function verifyX402Settlement(
       ...(notify.paymentId === undefined ? {} : { expectedPaymentId: notify.paymentId }),
       expectedPayer: notify.payer,
     });
-  } catch (cause) {
-    throw invalidSettlement(context, cause);
+  } catch {
+    throw invalidSettlement(context);
   }
+  if (signed.trusted !== true) throw invalidSettlement(context);
   const chain = await verifyReceipt(client(context, options), {
     signedReceipt: notify.signedReceipt,
     receipt,
@@ -65,7 +67,10 @@ export async function verifyX402Settlement(
     minConfirmations: options.minConfirmations,
   });
   if (
-    !chain.valid ||
+    chain.valid !== true ||
+    typeof chain.confirmed !== "boolean" ||
+    (chain.confirmations !== undefined &&
+      (!Number.isSafeInteger(chain.confirmations) || chain.confirmations < 0)) ||
     chain.txHash !== notify.txHash ||
     chain.network !== options.network ||
     chain.matches?.payTo !== true ||
@@ -148,13 +153,12 @@ function client(context: ProviderContext, options: X402AdapterOptions): Injected
   });
 }
 
-function invalidSettlement(context: ProviderContext, cause?: unknown): PolybillError {
+function invalidSettlement(context: ProviderContext): PolybillError {
   return new PolybillError("x402 settlement evidence did not match the expected payment", {
     code: "provider_response_invalid",
     operation: "x402.settlement.verify",
     provider: "x402",
     connectionId: context.connection.id,
     retryable: false,
-    ...(cause === undefined ? {} : { cause }),
   });
 }

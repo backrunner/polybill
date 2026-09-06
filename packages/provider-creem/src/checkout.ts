@@ -1,6 +1,8 @@
 import {
   object,
   optionalString,
+  providerIntegerAmount,
+  providerIdempotencyKey,
   stringField,
   type CheckoutProvider,
   type ProviderCheckoutCommand,
@@ -22,9 +24,6 @@ export const creemCheckout: CheckoutProvider = {
       decode((await creemRequest(context, "GET", `/v1/checkouts?${query.toString()}`)).json()),
     );
   },
-  async recoverByIdempotencyKey(context, _key, command) {
-    return create(context, command);
-  },
 };
 
 async function create(
@@ -41,12 +40,14 @@ async function create(
       retryable: false,
     });
   const body = {
-    request_id: context.idempotencyKey,
+    request_id: await providerIdempotencyKey(context, "POST", "/v1/checkouts"),
     product_id: line.externalPriceId,
     units: line.quantity,
     success_url: command.successUrl,
     metadata: { ...command.metadata, polybill_order_id: command.orderId },
-    ...(line.price.kind === "custom" ? { custom_price: line.unitAmount.amount } : {}),
+    ...(line.price.kind === "custom"
+      ? { custom_price: providerIntegerAmount(line.unitAmount.amount, "creem", 99_999_999, 100) }
+      : {}),
     ...(command.customerEmail === undefined ? {} : { customer: { email: command.customerEmail } }),
   };
   const value = decode((await creemRequest(context, "POST", "/v1/checkouts", body)).json());
@@ -94,7 +95,7 @@ function result(
       observedAt: context.clock.now(),
       rawStatus: value.rawStatus,
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

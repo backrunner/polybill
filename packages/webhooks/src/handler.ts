@@ -32,66 +32,90 @@ export function createWebhookHandler(
   options: WebhookHandlerOptions,
 ): (request: Request) => Promise<Response> {
   const maxBodyBytes = options.maxBodyBytes ?? 256 * 1024;
+  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1)
+    throw new RangeError("Invalid webhook body limit");
   return async (request) => {
-    if (request.method !== "POST") return response({ code: "method_not_allowed" }, 405);
-    const route = new URL(request.url).pathname.split("/").filter(Boolean);
-    const marker = route.indexOf("polybill");
-    const providerSlug = marker >= 0 ? route[marker + 1] : undefined;
-    const connectionId = marker >= 0 ? route[marker + 2] : undefined;
-    if (providerSlug === undefined || !ALLOWED.has(providerSlug))
-      return response({ code: "provider_not_found" }, 404);
-    if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json"))
-      return response({ code: "content_type_invalid" }, 415);
-    const adapter = options.adapters.get(providerSlug);
-    if (adapter === undefined) return response({ code: "provider_not_configured" }, 404);
-    const resolved = await options.resolver.resolve({
-      provider: providerSlug,
-      ...(connectionId === undefined ? {} : { connectionId }),
-      headers: request.headers,
-    });
-    if (resolved === undefined) return response({ code: "connection_ambiguous" }, 400);
-    const expectedProvider = providerName(providerSlug);
-    if (
-      expectedProvider === undefined ||
-      adapter.descriptor.name !== expectedProvider ||
-      resolved.connection.provider !== expectedProvider
-    )
-      return response({ code: "connection_provider_mismatch" }, 400);
-    const declaredLength = Number(request.headers.get("content-length"));
-    if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes)
-      return response({ code: "body_too_large" }, 413);
-    const body = await readBody(request, maxBodyBytes);
-    if (body === undefined) return response({ code: "body_too_large" }, 413);
-    const now = parseIsoDateTime((options.now ?? (() => new Date().toISOString()))());
-    let verified;
     try {
-      verified = await adapter.webhooks.verify({
-        rawBody: body,
+      if (request.method !== "POST") return response({ code: "method_not_allowed" }, 405);
+      const route = /^\/webhooks\/polybill\/([^/]+)(?:\/([^/]+))?\/?$/.exec(
+        new URL(request.url).pathname,
+      );
+      const providerSlug = route?.[1];
+      const connectionId = route?.[2];
+      if (providerSlug === undefined || !ALLOWED.has(providerSlug))
+        return response({ code: "provider_not_found" }, 404);
+      if (
+        (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() !==
+        "application/json"
+      )
+        return response({ code: "content_type_invalid" }, 415);
+      const adapter = options.adapters.get(providerSlug);
+      if (adapter === undefined) return response({ code: "provider_not_configured" }, 404);
+      const resolved = await options.resolver.resolve({
+        provider: providerSlug,
+        ...(connectionId === undefined ? {} : { connectionId }),
         headers: request.headers,
-        secret: resolved.secret,
-        environment: resolved.connection.environment,
-        now,
       });
-    } catch (error) {
-      if (error instanceof PolybillError && error.code === "replay_rejected")
-        return response({ code: error.code }, 401);
-      return response({ code: "signature_invalid" }, 401);
+      if (resolved === undefined) return response({ code: "connection_ambiguous" }, 400);
+      const expectedProvider = providerName(providerSlug);
+      if (
+        expectedProvider === undefined ||
+        adapter.descriptor.name !== expectedProvider ||
+        resolved.connection.provider !== expectedProvider ||
+        resolved.connection.tenantId !== resolved.tenantId ||
+        (connectionId !== undefined && connectionId !== resolved.connection.id)
+      )
+        return response({ code: "connection_provider_mismatch" }, 400);
+      const declaredLength = Number(request.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes)
+        return response({ code: "body_too_large" }, 413);
+      const body = await readBody(request, maxBodyBytes);
+      if (body === undefined) return response({ code: "body_too_large" }, 413);
+      const now = parseIsoDateTime((options.now ?? (() => new Date().toISOString()))());
+      let verified;
+      try {
+        verified = await adapter.webhooks.verify({
+          rawBody: body,
+          headers: request.headers,
+          secret: resolved.secret,
+          environment: resolved.connection.environment,
+          now,
+          replayProtection: "inbox",
+        });
+        if (
+          verified.provider !== expectedProvider ||
+          verified.environment !== resolved.connection.environment
+        )
+          return response({ code: "connection_provider_mismatch" }, 400);
+      } catch (error) {
+        if (error instanceof PolybillError && error.code === "replay_rejected")
+          return response({ code: error.code }, 401);
+        return response({ code: "signature_invalid" }, 401);
+      }
+      const record: InboxRecord = {
+        tenantId: resolved.tenantId,
+        connection: resolved.connection,
+        deliveryKey: verified.deliveryKey,
+        ...(verified.providerEventId === undefined
+          ? {}
+          : { providerEventId: verified.providerEventId }),
+        receivedAt: now,
+        verified,
+      };
+      const claim = await options.inbox.claim(record);
+      if (claim !== "claimed")
+        return new Response(null, { status: claim === "duplicate_processing" ? 202 : 204 });
+      try {
+        await options.queue.send(record);
+        await options.inbox.markQueued(record);
+      } catch {
+        await options.inbox.markFailed(record, "queue_dispatch_failed", true);
+        return response({ code: "webhook_unavailable" }, 503);
+      }
+      return new Response(null, { status: 202 });
+    } catch {
+      return response({ code: "webhook_unavailable" }, 503);
     }
-    const record: InboxRecord = {
-      tenantId: resolved.tenantId,
-      connection: resolved.connection,
-      deliveryKey: verified.deliveryKey,
-      ...(verified.providerEventId === undefined
-        ? {}
-        : { providerEventId: verified.providerEventId }),
-      receivedAt: now,
-      verified,
-    };
-    const claim = await options.inbox.claim(record);
-    if (claim !== "claimed")
-      return new Response(null, { status: claim === "duplicate_processing" ? 202 : 204 });
-    await options.queue.send(record);
-    return new Response(null, { status: 202 });
   };
 }
 

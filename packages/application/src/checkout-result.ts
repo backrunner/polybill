@@ -4,7 +4,6 @@ import {
   money,
   multiplyMoney,
   parseId,
-  transitionPayment,
   type CheckoutSession,
   type Order,
   type Payment,
@@ -20,6 +19,13 @@ export async function commitRemoteCheckout(
   prepared: StoredPreparedCheckout,
   remote: ProviderOperationResult<ProviderCheckoutSnapshot>,
 ): Promise<CreateCheckoutResult> {
+  if (remote.value.status === "unknown")
+    throw new PolybillError("Provider checkout status is unknown", {
+      code: "provider_response_invalid",
+      operation: "checkout.decode_status",
+      provider: options.connection.provider,
+      retryable: false,
+    });
   if (
     prepared.discountReservationId !== undefined &&
     (remote.value.total === undefined ||
@@ -120,7 +126,7 @@ function toCheckoutResult(
   return {
     checkout,
     order,
-    payment: remote.status === "complete" ? transitionPayment(pending, "succeeded") : pending,
+    payment: pending,
     provider: options.connection.provider,
     warnings,
   };

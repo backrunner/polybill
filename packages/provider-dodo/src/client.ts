@@ -1,6 +1,7 @@
 import {
   assertCredentialEnvironment,
   createHttpTransport,
+  providerIdempotencyKey,
   type HttpResponse,
   type ProviderContext,
 } from "@polybill/adapter-kit";
@@ -28,16 +29,20 @@ export async function dodoRequest(
     context.connection.environment === "test"
       ? "https://test.dodopayments.com"
       : "https://live.dodopayments.com";
-  const response = await createHttpTransport({ fetch: context.fetch, provider: "dodo" }).send({
+  const key = await providerIdempotencyKey(context, method, path);
+  const response = await createHttpTransport({
+    fetch: context.fetch,
+    provider: "dodo",
+    deadline: context.deadline,
+    clock: context.clock,
+  }).send({
     url: `${base}${path}`,
     method,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(context.idempotencyKey === undefined
-        ? {}
-        : { "Idempotency-Key": context.idempotencyKey }),
+      ...(key === undefined ? {} : { "Idempotency-Key": key }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

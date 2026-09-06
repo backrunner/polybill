@@ -1,4 +1,5 @@
 import { parseIsoDateTime } from "@polybill/core";
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createStripeAdapter } from "../src/index.js";
 
@@ -9,6 +10,16 @@ const SIGNATURE =
 const SECRET = "whsec_fixture";
 
 describe("Stripe webhook security", () => {
+  it("rejects a valid signature whose livemode contradicts the endpoint binding", async () => {
+    const body = BODY.replace('"id":"evt_123"', '"livemode":true,"id":"evt_123"');
+    const signature = createHmac("sha256", SECRET).update(`1756080000.${body}`).digest("hex");
+    await expect(
+      createStripeAdapter().webhooks.verify({
+        ...input(body),
+        headers: new Headers({ "stripe-signature": `t=1756080000,v1=${signature}` }),
+      }),
+    ).rejects.toMatchObject({ code: "signature_invalid" });
+  });
   it("verifies the exact signed bytes and rejects body tampering", async () => {
     const adapter = createStripeAdapter();
     await expect(adapter.webhooks.verify(input(BODY))).resolves.toMatchObject({

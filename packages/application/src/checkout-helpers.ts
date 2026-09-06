@@ -7,6 +7,7 @@ import type {
   EvidenceId,
   OrderId,
   PaymentId,
+  IsoDateTime,
 } from "@polybill/core";
 
 export function fixedUnitAmount(model: PriceModel): Money {
@@ -82,6 +83,7 @@ export function parseStoredCheckoutResult(value: unknown): CreateCheckoutResult 
 }
 
 export interface StoredPreparedCheckout {
+  readonly attemptedAt?: IsoDateTime;
   readonly orderId: OrderId;
   readonly checkoutId: CheckoutId;
   readonly paymentId: PaymentId;

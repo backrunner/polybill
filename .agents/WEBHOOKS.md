@@ -51,9 +51,9 @@ Request
 | --- | --- | --- | --- |
 | Stripe | `Stripe-Signature`，官方 HMAC helper | raw body + timestamped signatures | event `id`；保留 tolerance，处理 secret rotation |
 | Dodo | Standard Webhooks headers (`webhook-id`/timestamp/signature) | raw body | `webhook-id`；官方重试最多 8 次 |
-| Polar | Standard Webhooks | raw body；secret base64 规则 | event ID；最多 10 次，连续失败会 disable |
+| Polar | Standard Webhooks envelope | raw body；兼容旧 secret UTF-8 和 2026-09-08 起的新 `whsec_` base64 secret | event ID；最多 10 次，连续失败会 disable |
 | Creem | `creem-signature` HMAC-SHA256 | raw body | event ID + 5 delivery attempts |
-| Waffo | `X-Waffo-Signature: t=...,v1=...` RSA-SHA256 | `${t}.${rawBody}` | payload `eventId`；timestamp 不能替代 dedupe |
+| Waffo | `X-Waffo-Signature: t=...,v1=...` RSA-SHA256 | `${t}.${rawBody}` | namespaced raw SHA-256；`id`/`eventId` 是业务实体引用 |
 | Lemon Squeezy | `X-Signature` HMAC-SHA256 | raw body | 无独立 delivery ID 时用 namespaced raw SHA-256；最多四次重试 |
 | Paddle Billing | `Paddle-Signature` HMAC-SHA256 | `${ts}:${rawBody}` | notification `event_id`；5 秒内 ack，按官方重试策略 |
 | x402 | merchant notify envelope / signed receipt | raw envelope + receipt bytes | nonce/payment identifier/tx hash；链上 evidence 再核验 |
@@ -83,6 +83,13 @@ verification key ID、state、attempts、last error code、canonical event IDs�
 
 raw payload retention 按 tenant policy 配置；删 raw 不删 digest、headers 摘要、canonical event
 和 audit evidence。PCI/PII 合规要求更严格时只保存加密 R2 reference。
+
+入站 claim 同时取得 60 秒 dispatch lease，队列发送成功后调用 `markQueued` 清除 lease。
+发送失败记录 `queue_dispatch_failed`；后续 provider retry 原子重领失败记录，进程在发送前崩溃则
+在 lease 过期后重领。发送成功但本地确认丢失可能导致重复 Queue delivery，canonical outbox
+按 scope + delivery + event type + aggregate 幂等。`markFailed` 不得回退 applied 状态。
+D1 的 `0011_inbox_dispatch.sql` 增加 nullable lease；旧记录保留原 state，并按已派发处理。
+新增 `WebhookInboxStore.markQueued` 是宿主 store port 的必要升级。
 
 ## 5. Canonical event mapping
 

@@ -87,6 +87,10 @@ interface ConnectionRef {
 
 - `connectionId` 参与每个 mapping、inbox、outbox、idempotency 和 audit key。
 - test object 永远不能作为 live command 的 input；mapping lookup 必须同时匹配 environment。
+- `ApplicationStore.bindConnection` 在 command claim/mapping lookup 前原子固定
+  `(tenantId, connectionId)` 对应的 provider、environment 和可选 accountRef。复用 ID 改环境或
+  账户必须失败，切换环境使用新的 connection ID。D1 使用已有 `polybill_connections` 表，旧部署
+  应先登记现有 connection binding；该 port 是宿主 store 的必要升级。
 - credential resolver 每次按需返回 provider-specific secret，便于 Workers secret binding、密钥
   轮换和测试注入。
 - 默认 base URL 由 adapter 根据环境选择；自定义 base URL 只在测试或显式 allowlist 下启用。

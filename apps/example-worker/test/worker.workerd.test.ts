@@ -157,6 +157,7 @@ async function applyMigrations(db: D1DatabaseLike & { exec(query: string): Promi
     "0008_discount_redemptions.sql",
     "0009_inbox_scope.sql",
     "0010_migration_reports.sql",
+    "0011_inbox_dispatch.sql",
   ]) {
     const sql = await readFile(
       new URL(`../../../packages/store-d1/migrations/${name}`, import.meta.url),

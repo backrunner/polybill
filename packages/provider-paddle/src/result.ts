@@ -12,7 +12,7 @@ export function paddleResult<
       observedAt: context.clock.now(),
       ...(value.rawStatus === undefined ? {} : { rawStatus: value.rawStatus }),
     },
-    idempotency: "both",
+    idempotency: "polybill",
     warnings: [],
   };
 }

@@ -29,6 +29,8 @@ export const stripeWebhooks: WebhookProvider = {
       (await matches(input.secret.previous, signatures, message));
     if (!active && !previous) throw signatureError("stripe");
     const root = decodeRoot(input.rawBody);
+    if (root.livemode !== undefined && root.livemode !== (input.environment === "live"))
+      throw signatureError("stripe");
     const eventId = stringField(root, "id", "stripe", "stripe.webhook.decode");
     const keyId = active ? input.secret.activeKeyId : input.secret.previousKeyId;
     return {

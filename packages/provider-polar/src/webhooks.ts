@@ -1,6 +1,7 @@
 import {
   assertWebhookTimestamp,
   canonicalWebhookEvent,
+  decodeBase64,
   joinBytes,
   object,
   optionalString,
@@ -19,17 +20,18 @@ export const polarWebhooks: WebhookProvider = {
       .split(" ")
       .map((value) => value.trim())
       .filter(Boolean)
-      .map((value) => (value.startsWith("v1,") ? value.slice(3) : value));
+      .filter((value) => value.startsWith("v1,"))
+      .map((value) => value.slice(3));
     if (id === null || timestampText === null || signatures.length === 0)
       throw signatureError("polar");
     const timestamp = Number(timestampText);
     assertWebhookTimestamp(timestamp, input.now, 300, "polar");
     const message = joinBytes(utf8(`${id}.${timestamp}.`), input.rawBody);
-    const active = await matches(input.secret.active, signatures, message);
+    const active = await matchesPolarSecret(input.secret.active, signatures, message);
     const previous =
       !active &&
       input.secret.previous !== undefined &&
-      (await matches(input.secret.previous, signatures, message));
+      (await matchesPolarSecret(input.secret.previous, signatures, message));
     if (!active && !previous) throw signatureError("polar");
     const keyId = active ? input.secret.activeKeyId : input.secret.previousKeyId;
     return {
@@ -100,6 +102,25 @@ async function matches(
   return false;
 }
 
+async function matchesPolarSecret(
+  secret: string,
+  signatures: readonly string[],
+  message: Uint8Array,
+): Promise<boolean> {
+  // Match Polar's documented rollout: legacy UTF-8 keys and new Standard Webhooks keys.
+  if (await matches(secret, signatures, message)) return true;
+  if (!secret.startsWith("whsec_")) return false;
+  let key: Uint8Array;
+  try {
+    key = decodeBase64(secret.slice(6));
+  } catch {
+    return false;
+  }
+  for (const signature of signatures)
+    if (await verifyHmacBase64(key, message, signature)) return true;
+  return false;
+}
+
 function decodeRoot(raw: Uint8Array) {
   let value: unknown;
   try {
@@ -119,7 +140,8 @@ function mappingFor(
     "order.paid": { type: "payment.succeeded.v1", aggregate: "order" },
     "subscription.created": { type: "subscription.created.v1", aggregate: "subscription" },
     "subscription.updated": { type: "subscription.changed.v1", aggregate: "subscription" },
-    "subscription.canceled": { type: "subscription.canceled.v1", aggregate: "subscription" },
+    "subscription.canceled": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.revoked": { type: "subscription.canceled.v1", aggregate: "subscription" },
     "refund.created": { type: "refund.created.v1", aggregate: "refund" },
   };
   return map[type];

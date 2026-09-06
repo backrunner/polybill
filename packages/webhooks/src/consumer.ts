@@ -25,7 +25,11 @@ export function createWebhookConsumer(
       return;
     }
     try {
-      const decoded = adapter.webhooks.decode(record.verified);
+      const parsed = adapter.webhooks.decode(record.verified);
+      const decoded = {
+        ...parsed,
+        externalIds: { ...parsed.externalIds, event: record.deliveryKey },
+      };
       const events = await adapter.webhooks.map(decoded, {
         tenantId: record.tenantId,
         connection: record.connection,

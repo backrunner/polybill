@@ -33,6 +33,69 @@ function context(fetch: typeof globalThis.fetch) {
 }
 
 describe("Dodo adapter contract", () => {
+  it("uses the refund ID when a refund notification also includes its payment ID", async () => {
+    const adapter = createDodoAdapter();
+    const decoded = adapter.webhooks.decode({
+      provider: "dodo",
+      environment: "test",
+      deliveryKey: "dodo:refund-review",
+      providerEventId: "msg_refund",
+      verifiedAt: context(globalThis.fetch).clock.now(),
+      rawBody: new TextEncoder().encode(
+        JSON.stringify({
+          type: "refund.succeeded",
+          data: { refund_id: "ref_remote", payment_id: "pay_remote" },
+        }),
+      ),
+    });
+    expect(decoded.externalIds.object).toBe("ref_remote");
+    expect(adapter.checkout?.recoverByIdempotencyKey).toBeUndefined();
+  });
+
+  it("encodes the documented numeric custom amount without losing precision", async () => {
+    const scripted = createScriptedFetch([
+      {
+        method: "POST",
+        url: "https://test.dodopayments.com/checkouts",
+        response: Response.json({
+          session_id: "cks_numeric",
+          checkout_url: "https://checkout.dodopayments.test/numeric",
+        }),
+      },
+    ]);
+    const adapter = createDodoAdapter();
+    const command = {
+      orderId: parseId<"OrderId">("ord_dodonumeric", "ord"),
+      lines: [
+        {
+          skuId: parseId<"SkuId">("sku_dodonumeric", "sku"),
+          quantity: 1,
+          price: { kind: "custom" as const },
+          unitAmount: money("2500", "USD"),
+          externalPriceId: "pdt_numeric",
+        },
+      ],
+      grossTotal: money("2500", "USD"),
+      total: money("2500", "USD"),
+      successUrl: "https://merchant.example/ok",
+      cancelUrl: "https://merchant.example/cancel",
+      metadata: {},
+    };
+    await adapter.checkout?.create(context(scripted.fetch), command);
+    expect(await scripted.requests[0]?.json()).toMatchObject({ product_cart: [{ amount: 2500 }] });
+    const overflow = {
+      ...command,
+      lines: command.lines.map((line) => ({
+        ...line,
+        unitAmount: money("9007199254740993", "USD"),
+      })),
+    };
+    await expect(adapter.checkout?.create(context(scripted.fetch), overflow)).rejects.toMatchObject(
+      { code: "invalid_request" },
+    );
+    expect(scripted.requests).toHaveLength(1);
+    scripted.assertConsumed();
+  });
   it("does not claim discounts before canonical net totals are connected", async () => {
     const capability = (await createDodoAdapter().getCapabilities(context(globalThis.fetch)))
       .capabilities["checkout.discount"];
@@ -80,7 +143,7 @@ describe("Dodo adapter contract", () => {
     expect(await request?.clone().json()).toMatchObject({
       product_cart: [{ product_id: "pdt_fixture", quantity: 1 }],
     });
-    expect(request?.headers.get("idempotency-key")).toBe("dodo-checkout-0001");
+    expect(request?.headers.get("idempotency-key")).toMatch(/^pb_[a-f0-9]{64}$/);
     scripted.assertConsumed();
 
     const unmapped = {
