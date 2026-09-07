@@ -76,7 +76,7 @@ implementation of the store ports) for durable deployments.
 
 ## Quick start
 
-Requirements: Node.js 20+, pnpm 11+.
+Requirements: Node.js 20+, pnpm 12.3.4+.
 
 ```bash
 git clone https://github.com/backrunner/polybill.git
