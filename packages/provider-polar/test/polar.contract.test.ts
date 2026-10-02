@@ -49,7 +49,11 @@ describe("Polar webhook contract", () => {
     ]) {
       if (type === undefined) throw new Error("missing fixture");
       const events = await adapter.webhooks.map(
-        { type, externalIds: { object: "sub_remote", event: type }, payload: {} },
+        {
+          type,
+          externalIds: { object: "sub_remote", event: type },
+          payload: { status: type === "subscription.revoked" ? "canceled" : "active" },
+        },
         mapContext,
       );
       expect(events[0]?.type).toBe(expected);
@@ -111,17 +115,17 @@ describe("Polar webhook contract", () => {
       {
         method: "POST",
         url: "https://sandbox-api.polar.sh/v1/customers/",
-        response: Response.json(customer),
+        response: polarJson(customer),
       },
       {
         method: "PATCH",
         url: `https://sandbox-api.polar.sh/v1/customers/${customer.id}`,
-        response: Response.json({ ...customer, name: "Updated" }),
+        response: polarJson({ ...customer, name: "Updated" }),
       },
       {
         method: "POST",
         url: "https://sandbox-api.polar.sh/v1/customer-sessions/",
-        response: Response.json({
+        response: polarJson({
           customer_portal_url: "https://polar.sh/portal/fixture",
           expires_at: "2026-08-25T01:00:00.000Z",
         }),
@@ -129,22 +133,22 @@ describe("Polar webhook contract", () => {
       {
         method: "GET",
         url: `https://sandbox-api.polar.sh/v1/subscriptions/${subscription.id}`,
-        response: Response.json(subscription),
+        response: polarJson(subscription),
       },
       {
         method: "PATCH",
         url: `https://sandbox-api.polar.sh/v1/subscriptions/${subscription.id}`,
-        response: Response.json({ ...subscription, cancel_at_period_end: true }),
+        response: polarJson({ ...subscription, cancel_at_period_end: true }),
       },
       {
         method: "PATCH",
         url: `https://sandbox-api.polar.sh/v1/subscriptions/${subscription.id}`,
-        response: Response.json(subscription),
+        response: polarJson(subscription),
       },
       {
         method: "DELETE",
         url: `https://sandbox-api.polar.sh/v1/customers/${customer.id}?anonymize=true`,
-        response: new Response(null, { status: 204 }),
+        response: new Response(null, { status: 204, headers: { "Polar-Version": "2026-10" } }),
       },
     ]);
     const adapter = createPolarAdapter();
@@ -176,6 +180,8 @@ describe("Polar webhook contract", () => {
       value: { status: "tombstoned" },
     });
     scripted.assertConsumed();
+    for (const request of scripted.requests)
+      expect(request.headers.get("Polar-Version")).toBe("2026-10");
   });
 });
 
@@ -201,4 +207,8 @@ function context(fetch: typeof globalThis.fetch) {
 
 function base64(value: Uint8Array): string {
   return globalThis.btoa(String.fromCharCode(...value));
+}
+
+function polarJson(value: unknown): Response {
+  return Response.json(value, { headers: { "Polar-Version": "2026-10" } });
 }

@@ -8,6 +8,8 @@ export * from "./request-safety.js";
 export * from "./migration.js";
 export * from "./ports.js";
 export * from "./resource-ports.js";
+export * from "./usage-ports.js";
+export * from "./subscription-policy.js";
 export * from "./rsa.js";
 export * from "./signatures.js";
 export * from "./web-crypto.js";

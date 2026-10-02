@@ -1,10 +1,18 @@
-import { PolybillError, parseId, parseIdempotencyKey, type IdempotencyKey } from "@polybill/core";
+import {
+  PolybillError,
+  parseId,
+  parseIdempotencyKey,
+  type IdempotencyKey,
+  type Subscription,
+  type ProviderName,
+} from "@polybill/core";
 import { stableStringify } from "./checkout-helpers.js";
 import { CustomerService } from "./customers.js";
 import { RefundService } from "./refunds.js";
 import type { ReconciliationTarget } from "./ports.js";
 import type { ResourceRuntime } from "./resource-runtime.js";
 import { SubscriptionService } from "./subscriptions.js";
+import { projectSubscription, subscriptionMapping } from "./subscription-snapshot.js";
 
 export type ReconciliationMode = "report_only" | "projection_only";
 
@@ -66,10 +74,13 @@ export class ReconciliationService {
     readonly limit?: number;
     readonly idempotencyKey: IdempotencyKey;
   }): Promise<ReconciliationBatchReport> {
+    if (input.mode !== "report_only" && input.mode !== "projection_only")
+      throw new TypeError("Invalid reconciliation mode");
+    await this.#runtime.context();
     const scope = {
       tenantId: this.#runtime.options.tenantId,
       connectionId: this.#runtime.options.connection.id,
-      stream: input.stream,
+      stream: JSON.stringify([input.mode, input.stream]),
     } as const;
     const checkpoint = await this.#runtime.options.store.getReconciliationCheckpoint(scope);
     const limit = input.limit ?? 100;
@@ -88,7 +99,20 @@ export class ReconciliationService {
         try {
           await this.#apply(
             target,
-            parseIdempotencyKey(`${input.idempotencyKey}:${checkpoint?.sequence ?? 0}:${index}`),
+            parseIdempotencyKey(
+              `reconcile:${await this.#runtime.options.crypto.sha256(
+                new TextEncoder().encode(
+                  stableStringify({
+                    key: input.idempotencyKey,
+                    stream: input.stream,
+                    mode: input.mode,
+                    sequence: checkpoint?.sequence ?? 0,
+                    index,
+                    target,
+                  }),
+                ),
+              )}`,
+            ),
           );
           reports.push({ ...report, status: "applied" });
         } catch (error) {
@@ -106,7 +130,7 @@ export class ReconciliationService {
       } else reports.push(report);
     }
     const sequence = (checkpoint?.sequence ?? 0) + page.items.length;
-    const cursor = page.nextCursor ?? checkpoint?.cursor;
+    const cursor = page.items.length === 0 ? undefined : page.nextCursor;
     await this.#runtime.options.store.saveReconciliationCheckpoint({
       ...scope,
       ...(cursor === undefined ? {} : { cursor }),
@@ -122,18 +146,21 @@ export class ReconciliationService {
   }
 
   async #differences(target: ReconciliationTarget): Promise<readonly ReconciliationDifference[]> {
+    const context = await this.#runtime.context();
+    const expected = await subscriptionMapping(this.#runtime, target.entityType, target.entityId);
+    assertScopedResource(target.externalId, expected, context.connection.provider);
     const current = await this.#runtime.options.store.getResource<Record<string, unknown>>(
       this.#runtime.options.tenantId,
       target.entityType,
       target.entityId,
     );
     if (current === undefined) return [{ field: "$", local: undefined, remote: "present" }];
-    const context = await this.#runtime.context();
     if (target.entityType === "customer") {
       await this.#runtime.requireCapability("customer.read", context);
       const get = this.#runtime.options.adapter.customers?.get;
       if (get === undefined) throw unsupported("customer.read");
       const remote = (await get(context, target.externalId)).value;
+      assertScopedResource(remote.externalId, expected, context.connection.provider);
       return compare(current, {
         email: remote.email,
         name: remote.name,
@@ -144,29 +171,43 @@ export class ReconciliationService {
       await this.#runtime.requireCapability("subscription.read", context);
       const get = this.#runtime.options.adapter.subscriptions?.get;
       if (get === undefined) throw unsupported("subscription.read");
-      const remote = (await get(context, target.externalId)).value;
-      const items = await Promise.all(
-        remote.items.map(async (item) => ({
-          priceId:
-            (await this.#runtime.options.store.findCanonicalId(
-              this.#runtime.options.tenantId,
-              this.#runtime.options.connection.id,
-              "price",
-              item.externalPriceId,
-            )) ?? item.externalPriceId,
-          quantity: item.quantity,
-        })),
+      const remote = (await get(context, expected)).value;
+      const subscription = await this.#runtime.options.store.getResource<Subscription>(
+        this.#runtime.options.tenantId,
+        "subscription",
+        target.entityId,
       );
-      return compare(current, {
-        status: remote.status,
-        items,
-        currentPeriodStart: remote.currentPeriodStart,
-        currentPeriodEnd: remote.currentPeriodEnd,
-      });
+      if (subscription === undefined)
+        throw new Error("Subscription disappeared during reconciliation");
+      assertScopedResource(remote.externalId, expected, context.connection.provider);
+      const projected = await projectSubscription(
+        this.#runtime,
+        subscription.id,
+        subscription.customerId,
+        remote,
+        subscription.version,
+        subscription,
+      );
+      return compare(
+        current,
+        {
+          status: projected.status,
+          items: projected.items,
+          currentPeriodStart: projected.currentPeriodStart,
+          currentPeriodEnd: projected.currentPeriodEnd,
+          scheduledChange: projected.scheduledChange,
+          collectionPause: projected.collectionPause,
+          trialEnd: projected.trialEnd,
+          resumesAt: projected.resumesAt,
+          accessUntil: projected.accessUntil,
+        },
+        true,
+      );
     }
     const get = this.#runtime.options.adapter.refunds?.get;
     if (get === undefined) throw unsupported("refund.read");
     const remote = (await get(context, target.externalId)).value;
+    assertScopedResource(remote.externalId, expected, context.connection.provider);
     return compare(current, { amount: remote.amount, status: remote.status });
   }
 
@@ -195,9 +236,11 @@ export class ReconciliationService {
 function compare(
   local: Readonly<Record<string, unknown>>,
   remote: Readonly<Record<string, unknown>>,
+  includeRemovals = false,
 ): readonly ReconciliationDifference[] {
   return Object.entries(remote).flatMap(([field, value]) =>
-    value !== undefined && stableStringify(local[field]) !== stableStringify(value)
+    (value !== undefined || includeRemovals) &&
+    stableStringify(local[field] ?? null) !== stableStringify(value ?? null)
       ? [{ field, local: local[field], remote: value }]
       : [],
   );
@@ -209,4 +252,14 @@ function unsupported(operation: string): PolybillError {
     operation,
     retryable: false,
   });
+}
+
+function assertScopedResource(actual: string, expected: string, provider: ProviderName): void {
+  if (actual !== expected || expected.length === 0)
+    throw new PolybillError("Reconciliation resource does not match the connection mapping", {
+      code: "provider_response_invalid",
+      operation: "reconciliation.read",
+      provider,
+      retryable: false,
+    });
 }

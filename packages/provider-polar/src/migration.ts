@@ -7,41 +7,45 @@ import {
   type ProviderImportEntityType,
   type ProviderMigrationSource,
 } from "@polybill/adapter-kit";
-import { polarRequest } from "./client.js";
+import { polarRequest, type PolarRequest } from "./client.js";
 
 const supported = ["product", "price", "customer", "subscription", "payment"] as const;
 
-export const polarMigration: ProviderMigrationSource = {
-  supportedEntityTypes: supported,
-  async scan(context, entityType, cursor) {
-    if (!supported.includes(entityType as (typeof supported)[number]))
-      throw unsupportedProviderImport(context, entityType);
-    const requestedPage = pageNumber(context, cursor);
-    const query = new URLSearchParams({ page: String(requestedPage), limit: "100" });
-    const root = object(
-      (await polarRequest(context, "GET", `${path(entityType)}?${query}`)).json(),
-      "polar",
-      "polar.migration.scan",
-    );
-    const items = arrayField(root, "items", "polar", "polar.migration.scan").map((item) =>
-      object(item, "polar", "polar.migration.scan"),
-    );
-    const pagination = object(root.pagination, "polar", "polar.migration.scan");
-    if (
-      !Number.isSafeInteger(pagination.total_count) ||
-      Number(pagination.total_count) < 0 ||
-      !Number.isSafeInteger(pagination.max_page) ||
-      Number(pagination.max_page) < requestedPage
-    )
-      invalid("polar", "polar.migration.scan");
-    return {
-      items,
-      ...(Number(pagination.max_page) === requestedPage
-        ? {}
-        : { nextCursor: String(requestedPage + 1) }),
-    };
-  },
-};
+export function createPolarMigration(
+  request: PolarRequest = polarRequest,
+): ProviderMigrationSource {
+  return {
+    supportedEntityTypes: supported,
+    async scan(context, entityType, cursor) {
+      if (!supported.includes(entityType as (typeof supported)[number]))
+        throw unsupportedProviderImport(context, entityType);
+      const requestedPage = pageNumber(context, cursor);
+      const query = new URLSearchParams({ page: String(requestedPage), limit: "100" });
+      const root = object(
+        (await request(context, "GET", `${path(entityType)}?${query}`)).json(),
+        "polar",
+        "polar.migration.scan",
+      );
+      const items = arrayField(root, "items", "polar", "polar.migration.scan").map((item) =>
+        object(item, "polar", "polar.migration.scan"),
+      );
+      const pagination = object(root.pagination, "polar", "polar.migration.scan");
+      if (
+        !Number.isSafeInteger(pagination.total_count) ||
+        Number(pagination.total_count) < 0 ||
+        !Number.isSafeInteger(pagination.max_page) ||
+        Number(pagination.max_page) < requestedPage
+      )
+        invalid("polar", "polar.migration.scan");
+      return {
+        items,
+        ...(Number(pagination.max_page) === requestedPage
+          ? {}
+          : { nextCursor: String(requestedPage + 1) }),
+      };
+    },
+  };
+}
 
 function path(entityType: ProviderImportEntityType): string {
   const paths: Partial<Record<ProviderImportEntityType, string>> = {

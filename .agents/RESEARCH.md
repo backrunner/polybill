@@ -61,6 +61,9 @@ provider API version、核验日期和 fixture 版本，不能把本表当成永
 
 ### Polar
 
+- [API versioning](https://polar.sh/docs/api-reference/2026-10/versioning.md)
+- [API changelog](https://polar.sh/docs/changelog/api.md)
+- [2026-10 compatibility review and upgrade procedure](./POLAR_API_2026-10.md)
 - [Sandbox environment](https://polar.sh/docs/integrate/sandbox.md)
 - [Products](https://polar.sh/docs/features/products.md)
 - [License-key benefit](https://polar.sh/docs/features/benefits/license-keys.md)

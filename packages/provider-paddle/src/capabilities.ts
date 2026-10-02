@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -14,6 +15,9 @@ export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot
     adapterVersion: "0.1.0",
     providerApiVersion: PADDLE_API_VERSION,
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "This operation is not implemented by the Polybill adapter; it is not a statement that the provider lacks this feature",
+      ),
       "checkout.hosted": {
         ...native,
         constraints: { redirectConfiguration: "application_or_paddle_js" },
@@ -39,6 +43,7 @@ export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot
         ["Create a transaction or hosted checkout for the mapped recurring prices"],
       ),
       "subscription.read": native,
+      "subscription.bind_checkout": native,
       "subscription.change_items": {
         ...native,
         constraints: {
@@ -52,13 +57,30 @@ export function paddleCapabilities(context: ProviderContext): CapabilitySnapshot
         constraints: {
           timing: ["immediately", "period_end"],
           invoiceBehavior: ["stop_billing"],
+          automaticResume: true,
         },
       },
       "subscription.resume": {
         ...native,
-        constraints: { onResume: "start_new_billing_period" },
+        constraints: {
+          onResume: "start_new_billing_period",
+          billingPeriod: ["continue_current", "restart"],
+          continueRequiresUnexpiredPeriod: true,
+        },
       },
       "subscription.cancel": native,
+      "subscription.clear_scheduled_change": {
+        ...native,
+        constraints: { kinds: ["cancel", "pause"] },
+      },
+      "subscription.set_trial_end": {
+        ...native,
+        constraints: {
+          status: ["trialing"],
+          minimumFutureMinutes: 30,
+          immediateActivation: "automatic_collection_only",
+        },
+      },
       "refund.partial": unsupportedCapability(
         "Paddle partial refunds require historical adjustment allocation; Polybill cannot safely derive remaining line-item balance from a transaction read alone",
         ["Use refund.full or reconcile provider adjustments before issuing a partial refund"],

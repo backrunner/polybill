@@ -1,11 +1,15 @@
 import type { ProviderContext } from "@polybill/adapter-kit";
 
 /** Track transport, including failures before an adapter can decode its response. */
-export function trackMutation(context: ProviderContext): {
+export function trackMutation(
+  context: ProviderContext,
+  beforeMutation?: () => Promise<void>,
+): {
   readonly context: ProviderContext;
   mayHaveMutated(): boolean;
 } {
   let uncertain = false;
+  let recorded: Promise<void> | undefined;
   return {
     context: {
       ...context,
@@ -15,6 +19,10 @@ export function trackMutation(context: ProviderContext): {
         ).toUpperCase();
         if (method === "GET" || method === "HEAD") return context.fetch(input, init);
         uncertain = true;
+        if (beforeMutation !== undefined) {
+          recorded ??= beforeMutation();
+          await recorded;
+        }
         return context.fetch(input, init);
       },
     },

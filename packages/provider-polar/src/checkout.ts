@@ -9,25 +9,26 @@ import {
   type ProviderOperationResult,
 } from "@polybill/adapter-kit";
 import { PolybillError, parseIsoDateTime } from "@polybill/core";
-import { polarRequest } from "./client.js";
+import { polarRequest, type PolarRequest } from "./client.js";
 
-export const polarCheckout: CheckoutProvider = {
-  async create(context, command) {
-    return create(context, command);
-  },
-  async get(context, externalId) {
-    return result(
-      context,
-      decode(
-        (
-          await polarRequest(context, "GET", `/v1/checkouts/${encodeURIComponent(externalId)}`)
-        ).json(),
-      ),
-    );
-  },
-};
+export function createPolarCheckout(request: PolarRequest = polarRequest): CheckoutProvider {
+  return {
+    async create(context, command) {
+      return create(request, context, command);
+    },
+    async get(context, externalId) {
+      return result(
+        context,
+        decode(
+          (await request(context, "GET", `/v1/checkouts/${encodeURIComponent(externalId)}`)).json(),
+        ),
+      );
+    },
+  };
+}
 
 async function create(
+  request: PolarRequest,
   context: ProviderContext,
   command: ProviderCheckoutCommand,
 ): Promise<ProviderOperationResult<ProviderCheckoutSnapshot>> {
@@ -64,11 +65,14 @@ async function create(
     command.lines.length === 1 && command.lines[0]?.price.kind === "seat"
       ? command.lines[0]
       : undefined;
-  const response = await polarRequest(context, "POST", "/v1/checkouts/", {
+  const response = await request(context, "POST", "/v1/checkouts/", {
     products,
     success_url: command.successUrl,
     return_url: command.cancelUrl,
     metadata: { ...command.metadata, polybill_order_id: command.orderId },
+    ...(command.externalCustomerId === undefined
+      ? {}
+      : { customer_id: command.externalCustomerId }),
     ...(command.customerEmail === undefined ? {} : { customer_email: command.customerEmail }),
     ...(seatLine === undefined ? {} : { seats: seatLine.quantity }),
   });
@@ -93,6 +97,10 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const expiresAt = optionalString(root, "expires_at");
   return {
     externalId: stringField(root, "id", "polar", "polar.checkout.decode"),
+    externalSubscriptionIds:
+      optionalString(root, "subscription_id") === undefined
+        ? []
+        : [stringField(root, "subscription_id", "polar", "polar.checkout.decode")],
     ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
     status,
     ...(url === undefined ? {} : { url }),

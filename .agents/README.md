@@ -52,6 +52,10 @@ Billing 和 `x402-paysdk`。
 | [MODULES.md](./MODULES.md) | monorepo 包结构、模块职责和依赖规则 |
 | [DATA_MODEL.md](./DATA_MODEL.md) | canonical entities、状态机、表和索引 |
 | [PROVIDER_CONTRACT.md](./PROVIDER_CONTRACT.md) | adapter SPI、能力协商、错误和幂等约定 |
+| [POLAR_API_2026-10.md](./POLAR_API_2026-10.md) | Polar 2026-10 / 2027-01 版本契约、漂移检查与回滚 |
+| [SUBSCRIPTIONS_2026-10.md](./SUBSCRIPTIONS_2026-10.md) | 八个平台的订阅机制覆盖、当前实现与待接入项 |
+| [BILLING_WORKFLOWS.md](./BILLING_WORKFLOWS.md) | 异步订阅绑定、延期执行、精确费率与额度账本 |
+| [PROVIDER_API_REVIEW_2026-10-02.md](./PROVIDER_API_REVIEW_2026-10-02.md) | 各家官方 API 与接入文档逐项复核、协议偏差与证据边界 |
 | [WEBHOOKS.md](./WEBHOOKS.md) | 统一入口、签名、inbox、事件归一化和对账 |
 | [MIGRATION.md](./MIGRATION.md) | 已有系统接入、provider 切换、双跑和回滚 |
 | [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) | 现有系统的非侵入接入步骤和 cutback 操作 |

@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -14,6 +15,9 @@ export function creemCapabilities(context: ProviderContext): CapabilitySnapshot 
     adapterVersion: "0.1.0",
     providerApiVersion: CREEM_API_VERSION,
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "This operation is not implemented by the Polybill adapter; it is not a statement that the provider lacks this feature",
+      ),
       "checkout.hosted": { ...native, constraints: { maxItems: 1, cancelUrl: false } },
       "checkout.ad_hoc_price": {
         ...native,
@@ -32,10 +36,30 @@ export function creemCapabilities(context: ProviderContext): CapabilitySnapshot 
         ["Create a hosted checkout for the mapped recurring product"],
       ),
       "subscription.read": native,
+      "subscription.bind_checkout": native,
+      "subscription.change_items": {
+        ...native,
+        constraints: {
+          timing: ["immediately"],
+          maxItems: 1,
+          priceReference: "product_id",
+          simultaneousProductAndQuantity: false,
+          proration: ["none", "prorate_next_invoice", "prorate_immediately"],
+        },
+      },
+      "subscription.proration": native,
+      "subscription.clear_scheduled_change": { ...native, constraints: { kinds: ["cancel"] } },
+      "subscription.set_trial_end": unsupportedCapability(
+        "Creem trial duration is configured on the product; no trial-end mutation is exposed",
+      ),
       "subscription.cancel": native,
       "subscription.pause": {
         ...native,
-        constraints: { timing: ["immediately"], invoiceBehavior: ["stop_billing"] },
+        constraints: {
+          timing: ["immediately"],
+          invoiceBehavior: ["stop_billing"],
+          automaticResume: false,
+        },
       },
       "subscription.resume": native,
       "refund.full": unsupportedCapability(

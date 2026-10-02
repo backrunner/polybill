@@ -1,12 +1,19 @@
 import {
   arrayField,
+  assertProviderSubscriptionItems,
+  assertSubscriptionIdentity,
   object,
+  optionalString,
   stringField,
   type ProviderSubscriptionSnapshot,
   type SubscriptionProvider,
 } from "@polybill/adapter-kit";
 import {
   PolybillError,
+  assertFutureSubscriptionDate,
+  assertSubscriptionPausePolicy,
+  assertSubscriptionItemChangePolicy,
+  validateBillingInterval,
   parseIsoDateTime,
   type SubscriptionItemChangePolicy,
   type SubscriptionPausePolicy,
@@ -14,12 +21,20 @@ import {
 } from "@polybill/core";
 import { stripeRequest } from "./client.js";
 import { stripeResult } from "./result.js";
+import { completeStripeSubscription } from "./subscription-items.js";
 
 export const stripeSubscriptions: SubscriptionProvider = {
   async create(context, input) {
-    if (input.trial !== undefined)
-      throw unsupported(context, "Trial intervals require an explicit Stripe day-count policy");
+    assertProviderSubscriptionItems(input.items);
     const body = new URLSearchParams({ customer: input.externalCustomerId });
+    if (input.trial !== undefined) {
+      validateBillingInterval(input.trial);
+      if (input.trial.unit !== "day" && input.trial.unit !== "week")
+        throw unsupported(context, "Stripe trial creation requires a day or week interval");
+      const days = input.trial.count * (input.trial.unit === "week" ? 7 : 1);
+      if (days > 730) throw unsupported(context, "Stripe trials cannot exceed 730 days");
+      body.set("trial_period_days", String(days));
+    }
     input.items.forEach((item, index) => {
       body.set(`items[${index}][price]`, item.externalPriceId);
       body.set(`items[${index}][quantity]`, String(item.quantity));
@@ -27,20 +42,27 @@ export const stripeSubscriptions: SubscriptionProvider = {
     for (const [key, value] of Object.entries(input.metadata)) body.set(`metadata[${key}]`, value);
     return stripeResult(
       context,
-      decodeSubscription((await stripeRequest(context, "POST", "/v1/subscriptions", body)).json()),
+      await decodeResponse(
+        context,
+        (await stripeRequest(context, "POST", "/v1/subscriptions", body)).json(),
+      ),
     );
   },
   async get(context, externalId) {
     return stripeResult(
       context,
-      decodeSubscription(
+      await decodeResponse(
+        context,
         (
           await stripeRequest(context, "GET", `/v1/subscriptions/${encodeURIComponent(externalId)}`)
         ).json(),
+        externalId,
       ),
     );
   },
   async changeItems(context, externalId, input) {
+    assertProviderSubscriptionItems(input.items);
+    assertSubscriptionItemChangePolicy(input.policy);
     assertItemChange(
       context.connection.id,
       input.policy,
@@ -51,10 +73,12 @@ export const stripeSubscriptions: SubscriptionProvider = {
       "GET",
       `/v1/subscriptions/${encodeURIComponent(externalId)}`,
     );
-    const body = itemChangeBody(current.json(), input.items, input.policy);
+    const complete = await completeStripeSubscription(context, current.json(), externalId);
+    const body = itemChangeBody(complete, input.items, input.policy);
     return stripeResult(
       context,
-      decodeSubscription(
+      await decodeResponse(
+        context,
         (
           await stripeRequest(
             context,
@@ -63,19 +87,66 @@ export const stripeSubscriptions: SubscriptionProvider = {
             body,
           )
         ).json(),
+        externalId,
       ),
     );
   },
   async pause(context, externalId, policy) {
+    assertSubscriptionPausePolicy(policy, context.clock.now());
     assertPause(context.connection.id, policy);
+    const body = new URLSearchParams({ "pause_collection[behavior]": stripePauseBehavior(policy) });
+    if (policy.resumesAt !== undefined)
+      body.set(
+        "pause_collection[resumes_at]",
+        String(Math.floor(Date.parse(policy.resumesAt) / 1000)),
+      );
+    return update(context, externalId, body);
+  },
+  async resume(context, externalId) {
+    const current = object(
+      (
+        await stripeRequest(context, "GET", `/v1/subscriptions/${encodeURIComponent(externalId)}`)
+      ).json(),
+      "stripe",
+      "stripe.subscription.read",
+    );
+    assertSubscriptionIdentity(current.id, externalId, "stripe");
+    if (current.status === "paused")
+      return stripeResult(
+        context,
+        await decodeResponse(
+          context,
+          (
+            await stripeRequest(
+              context,
+              "POST",
+              `/v1/subscriptions/${encodeURIComponent(externalId)}/resume`,
+              new URLSearchParams({ billing_cycle_anchor: "now", proration_behavior: "none" }),
+            )
+          ).json(),
+          externalId,
+        ),
+      );
+    return update(context, externalId, new URLSearchParams({ pause_collection: "" }));
+  },
+  async clearScheduledChange(context, externalId, kind) {
+    if (kind !== "cancel")
+      throw unsupported(context, "This Stripe operation clears a pending cancellation only");
     return update(
       context,
       externalId,
-      new URLSearchParams({ "pause_collection[behavior]": stripePauseBehavior(policy) }),
+      new URLSearchParams({ cancel_at_period_end: "false", cancel_at: "" }),
     );
   },
-  async resume(context, externalId) {
-    return update(context, externalId, new URLSearchParams({ pause_collection: "" }));
+  async setTrialEnd(context, externalId, end) {
+    if (end !== "now") assertFutureSubscriptionDate(end, context.clock.now());
+    return update(
+      context,
+      externalId,
+      new URLSearchParams({
+        trial_end: end === "now" ? "now" : String(Math.floor(Date.parse(end) / 1000)),
+      }),
+    );
   },
   async cancel(context, externalId, timing) {
     const response =
@@ -91,7 +162,7 @@ export const stripeSubscriptions: SubscriptionProvider = {
             `/v1/subscriptions/${encodeURIComponent(externalId)}`,
             new URLSearchParams({ cancel_at_period_end: "true" }),
           );
-    return stripeResult(context, decodeSubscription(response.json()));
+    return stripeResult(context, await decodeResponse(context, response.json(), externalId));
   },
 };
 
@@ -102,7 +173,8 @@ async function update(
 ) {
   return stripeResult(
     context,
-    decodeSubscription(
+    await decodeResponse(
+      context,
       (
         await stripeRequest(
           context,
@@ -111,6 +183,7 @@ async function update(
           body,
         )
       ).json(),
+      externalId,
     ),
   );
 }
@@ -153,36 +226,69 @@ function itemChangeBody(
   return body;
 }
 
+async function decodeResponse(
+  context: Parameters<typeof stripeRequest>[0],
+  value: unknown,
+  expectedId?: string,
+): Promise<ProviderSubscriptionSnapshot> {
+  return decodeSubscription(await completeStripeSubscription(context, value, expectedId));
+}
+
 function decodeSubscription(value: unknown): ProviderSubscriptionSnapshot {
   const root = object(value, "stripe", "stripe.subscription.decode");
   const rawStatus = stringField(root, "status", "stripe", "stripe.subscription.decode");
   const itemsRoot = object(root.items, "stripe", "stripe.subscription.decode");
-  const items = arrayField(itemsRoot, "data", "stripe", "stripe.subscription.decode").map(
-    (entry) => {
-      const item = object(entry, "stripe", "stripe.subscription.decode");
-      const price = object(item.price, "stripe", "stripe.subscription.decode");
-      const quantity = item.quantity;
-      if (!Number.isSafeInteger(quantity) || Number(quantity) < 1)
-        throw new TypeError("Stripe subscription quantity is invalid");
-      return {
-        externalPriceId: stringField(price, "id", "stripe", "stripe.subscription.decode"),
-        quantity: Number(quantity),
-      };
-    },
-  );
+  const entries = arrayField(itemsRoot, "data", "stripe", "stripe.subscription.decode");
+  const items = entries.map((entry) => {
+    const item = object(entry, "stripe", "stripe.subscription.decode");
+    const price = object(item.price, "stripe", "stripe.subscription.decode");
+    const quantity = item.quantity;
+    if (!Number.isSafeInteger(quantity) || Number(quantity) < 1)
+      throw new TypeError("Stripe subscription quantity is invalid");
+    return {
+      externalPriceId: stringField(price, "id", "stripe", "stripe.subscription.decode"),
+      quantity: Number(quantity),
+      ...timestamp(item.current_period_start, "currentPeriodStart"),
+      ...timestamp(item.current_period_end, "currentPeriodEnd"),
+    };
+  });
   return {
     externalId: stringField(root, "id", "stripe", "stripe.subscription.decode"),
     externalCustomerId: stringField(root, "customer", "stripe", "stripe.subscription.decode"),
-    status:
-      root.pause_collection === null || root.pause_collection === undefined
-        ? subscriptionStatus(rawStatus)
-        : "paused",
+    status: subscriptionStatus(rawStatus),
     items,
-    ...timestamp(root.current_period_start, "currentPeriodStart"),
-    ...timestamp(root.current_period_end, "currentPeriodEnd"),
+    ...timestamp(
+      root.current_period_start ?? commonPeriod(entries, "current_period_start"),
+      "currentPeriodStart",
+    ),
+    ...timestamp(
+      root.current_period_end ?? commonPeriod(entries, "current_period_end"),
+      "currentPeriodEnd",
+    ),
     cancelAtPeriodEnd: root.cancel_at_period_end === true,
+    ...(typeof root.cancel_at === "number" &&
+    rawStatus !== "canceled" &&
+    rawStatus !== "incomplete_expired"
+      ? {
+          scheduledChange: {
+            kind: "cancel" as const,
+            effectiveAt: parseIsoDateTime(new Date(root.cancel_at * 1000).toISOString()),
+          },
+        }
+      : {}),
+    ...collectionPause(root.pause_collection),
+    ...(typeof root.trial_end === "number"
+      ? { trialEnd: parseIsoDateTime(new Date(root.trial_end * 1000).toISOString()) }
+      : {}),
     rawStatus,
   };
+}
+
+function commonPeriod(entries: readonly unknown[], field: string): unknown {
+  const values = entries.map(
+    (entry) => object(entry, "stripe", "stripe.subscription.decode")[field],
+  );
+  return values.length > 0 && values.every((value) => value === values[0]) ? values[0] : undefined;
 }
 
 function assertItemChange(
@@ -203,7 +309,11 @@ function assertPause(
   connectionId: Parameters<typeof unsupported>[0]["connection"]["id"],
   policy: SubscriptionPausePolicy,
 ): void {
-  if (policy.timing !== "immediately" || policy.invoiceBehavior === "stop_billing")
+  if (
+    policy.timing !== "immediately" ||
+    policy.invoiceBehavior === "stop_billing" ||
+    policy.invoiceBehavior === "free"
+  )
     throw policyUnsupported(
       connectionId,
       "Stripe pause_collection only supports immediate invoice handling and does not stop billing periods",
@@ -241,10 +351,31 @@ function subscriptionStatus(value: string): SubscriptionStatus | "unknown" {
   if (value === "active") return "active";
   if (value === "past_due") return "past_due";
   if (value === "paused") return "paused";
-  if (value === "canceled" || value === "unpaid" || value === "incomplete_expired")
-    return "canceled";
+  if (value === "unpaid") return "unpaid";
+  if (value === "canceled" || value === "incomplete_expired") return "canceled";
   if (value === "incomplete") return "incomplete";
   return "unknown";
+}
+
+function collectionPause(value: unknown): Pick<ProviderSubscriptionSnapshot, "collectionPause"> {
+  if (value === null || value === undefined) return {};
+  const root = object(value, "stripe", "stripe.subscription.decode");
+  const behavior = optionalString(root, "behavior");
+  const invoiceBehavior = behavior === "keep_as_draft" ? "keep_draft" : behavior;
+  if (
+    invoiceBehavior !== "void" &&
+    invoiceBehavior !== "keep_draft" &&
+    invoiceBehavior !== "mark_uncollectible"
+  )
+    throw new TypeError("Unknown Stripe collection pause behavior");
+  return {
+    collectionPause: {
+      invoiceBehavior,
+      ...(typeof root.resumes_at === "number"
+        ? { resumesAt: parseIsoDateTime(new Date(root.resumes_at * 1000).toISOString()) }
+        : {}),
+    },
+  };
 }
 
 function timestamp(value: unknown, key: "currentPeriodStart" | "currentPeriodEnd") {

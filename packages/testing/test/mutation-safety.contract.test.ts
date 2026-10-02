@@ -61,6 +61,55 @@ async function send(context: ProviderContext) {
 }
 
 describe("mutation outcome safety", () => {
+  it("persists an unknown outcome before a mutation is handed to transport", async () => {
+    const store = createMemoryStore();
+    const crypto = createWebCryptoPort();
+    const scope = { tenantId, connectionId: connection.id, operation: "subscription.pause", key };
+    const hash = await crypto.sha256(new TextEncoder().encode("{}"));
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      // Inspect the durable state while the provider request is still in flight.
+      expect(await store.claim(scope, hash)).toMatchObject({ kind: "outcome_unknown" });
+      return Response.json({ ok: true });
+    });
+    const runtime = new ResourceRuntime(options(createFakeProvider(), fetch, store));
+    await runtime.mutate({
+      operation: scope.operation,
+      key,
+      payload: {},
+      decodeReplay: () => "done",
+      execute: async (context) => {
+        await send(context);
+        return "done";
+      },
+    });
+    expect(await store.claim(scope, hash)).toEqual({ kind: "replay", result: "done" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("never sends a mutation when persisting its attempt marker fails", async () => {
+    class FailingMarkerStore extends MemoryStore {
+      override async markUnknown(): Promise<void> {
+        throw new Error("marker unavailable");
+      }
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const runtime = new ResourceRuntime(
+      options(createFakeProvider(), fetch, new FailingMarkerStore()),
+    );
+    await expect(
+      runtime.mutate({
+        operation: "subscription.pause",
+        key,
+        payload: {},
+        decodeReplay: () => undefined,
+        execute: async (context) => {
+          await context.fetch("https://provider.example/pause", { method: "POST" });
+        },
+      }),
+    ).rejects.toThrow("marker unavailable");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects reusing a connection ID for live credentials before replay or transport", async () => {
     const store = createMemoryStore();
     const adapter = createFakeProvider();

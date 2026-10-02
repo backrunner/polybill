@@ -111,6 +111,10 @@ interface ConnectionRef {
 超时发生在“远端可能已成功”之后时，命令进入 `outcome_unknown`，先用 idempotency key 或
 provider query 恢复，禁止盲目重复创建。
 
+`ResourceRuntime` 在第一次非 GET/HEAD 请求之前持久化 unknown 标记，保存成功才允许 transport。
+这样进程在请求途中退出也保留未知结果证据；成功完成命令再转 complete。标记持久化失败时
+不得发送请求。发送前遗留的 claimed 记录仍需显式恢复，不因超时自动释放支付幂等记录。
+
 ## 5. Capability-driven portability
 
 可移植性不是取所有 provider 的最小交集。每个 capability 带实现等级、输入约束和迁移等级：
@@ -232,6 +236,21 @@ Cloudflare 默认实现使用 D1 保存 control plane、Queue 处理 outbox、Du
 的半套账务当成成功。
 
 ## 9. Event architecture
+
+Optional durable billing orchestration follows [BILLING_WORKFLOWS.md](./BILLING_WORKFLOWS.md).
+`BillingStore` owns scoped CAS records and immutable credit entries. The facade composes it only
+when `billing.store` is configured. `CanonicalResourceStore.insertResource` is a required insert-only
+port for recoverable checkout binding and meter creation; host implementations must never overwrite
+an existing snapshot through this port. The official stores support replay after a partial insert.
+
+Subscription updates use `CanonicalResourceStore.replaceResource` with an expected canonical
+snapshot version and an existing scoped external mapping. The replacement is a compare-and-swap:
+a concurrent winner makes the stale writer fail with `conflict`, without replacing the winner.
+The next canonical version must be exactly expected + 1. D1 checks the version in snapshot JSON
+because its physical snapshot revision also covers legacy writes. Observation audit evidence may
+precede replacement in sequential persistence mode; it is not proof of a committed projection.
+This required host store port is additive; existing tables and snapshots need no schema migration.
+
 
 事件有三层：
 

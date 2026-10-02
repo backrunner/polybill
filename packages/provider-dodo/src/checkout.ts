@@ -17,12 +17,38 @@ export const dodoCheckout: CheckoutProvider = {
     return create(context, command);
   },
   async get(context, externalId) {
-    return result(
-      context,
-      decodeStatus(
-        (await dodoRequest(context, "GET", `/checkouts/${encodeURIComponent(externalId)}`)).json(),
-      ),
+    const value = decodeStatus(
+      (await dodoRequest(context, "GET", `/checkouts/${encodeURIComponent(externalId)}`)).json(),
     );
+    if (value.externalId !== externalId) throw new TypeError("Dodo checkout ID mismatch");
+    if (value.status !== "complete" || value.externalPaymentId === undefined)
+      return result(context, value);
+    const payment = object(
+      (
+        await dodoRequest(
+          context,
+          "GET",
+          `/payments/${encodeURIComponent(value.externalPaymentId)}`,
+        )
+      ).json(),
+      "dodo",
+      "dodo.checkout.payment",
+    );
+    if (
+      payment.payment_id !== value.externalPaymentId ||
+      payment.checkout_session_id !== externalId
+    )
+      throw new TypeError("Dodo payment does not belong to this checkout");
+    const ids: unknown =
+      payment.subscription_ids ??
+      (typeof payment.subscription_id === "string" ? [payment.subscription_id] : []);
+    if (
+      !Array.isArray(ids) ||
+      ids.some((id: unknown) => typeof id !== "string" || id.length === 0) ||
+      new Set(ids).size !== ids.length
+    )
+      throw new TypeError("Dodo subscription references are invalid");
+    return result(context, { ...value, externalSubscriptionIds: ids as string[] });
   },
 };
 
@@ -52,7 +78,11 @@ async function create(
     return_url: command.successUrl,
     cancel_url: command.cancelUrl,
     metadata: { ...command.metadata, polybill_order_id: command.orderId },
-    ...(command.customerEmail === undefined ? {} : { customer: { email: command.customerEmail } }),
+    ...(command.externalCustomerId !== undefined
+      ? { customer: { customer_id: command.externalCustomerId } }
+      : command.customerEmail === undefined
+        ? {}
+        : { customer: { email: command.customerEmail } }),
   });
   const root = object(response.json(), "dodo", "dodo.checkout.decode");
   const url = optionalString(root, "checkout_url");

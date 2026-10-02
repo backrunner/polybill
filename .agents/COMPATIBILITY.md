@@ -26,6 +26,10 @@
 
 ## Capability policy
 
+- Polar requests default to `2026-10` and support explicit reviewed `2027-01` selection; webhook payloads accept `2027-01`, `2026-10`, `2026-04`,
+  and unversioned historical deliveries. Unreviewed versions remain unmapped raw evidence.
+  The [2026-10 review](./POLAR_API_2026-10.md) records the upstream schema comparison and endpoint
+  upgrade procedure. Offline coverage does not establish live endpoint configuration or sandbox proof.
 - [2026-09-06 payment review](./PAYMENT_REVIEW_2026-09-06.md) records the latest source review and
   corrected failure paths. Polar multi-item checkout is unsupported because its products are
   alternatives, not cart lines. Dodo, Polar and Creem checkout POST replay is not advertised as

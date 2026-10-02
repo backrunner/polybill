@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -14,6 +15,9 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
     adapterVersion: "0.1.0",
     providerApiVersion: DODO_API_VERSION,
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "This operation is not implemented by the Polybill adapter; it is not a statement that the provider lacks this feature",
+      ),
       "checkout.hosted": native,
       "checkout.ad_hoc_price": {
         ...native,
@@ -37,10 +41,45 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
         ["Create a hosted checkout for the mapped recurring product"],
       ),
       "subscription.read": native,
+      "subscription.bind_checkout": native,
+      "usage.meter": native,
+      "usage.ingest": {
+        ...native,
+        constraints: {
+          timestampWindowSeconds: 3600,
+          maximumQuantity: Number.MAX_SAFE_INTEGER,
+          authoritativeEventReadback: true,
+          invoiceFinality: false,
+        },
+      },
+      "subscription.change_items": {
+        ...native,
+        constraints: {
+          maxItems: 1,
+          policies: ["immediately:none", "immediately:prorate_immediately", "period_end:none"],
+          onPaymentFailure: "prevent_change",
+          preservesAddons: true,
+        },
+      },
+      "subscription.proration": {
+        ...native,
+        constraints: { proration: ["none", "prorate_immediately"] },
+      },
+      "subscription.clear_scheduled_change": {
+        ...native,
+        constraints: { kinds: ["cancel", "items"] },
+      },
+      "subscription.set_trial_end": unsupportedCapability(
+        "Dodo subscription update has no trial-end mutation; configure the trial at checkout",
+      ),
       "subscription.cancel": native,
       "subscription.pause": {
         ...native,
-        constraints: { timing: ["immediately"], invoiceBehavior: ["stop_billing"] },
+        constraints: {
+          timing: ["immediately"],
+          invoiceBehavior: ["stop_billing"],
+          automaticResume: false,
+        },
       },
       "subscription.resume": native,
       "refund.full": native,

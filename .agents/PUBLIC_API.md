@@ -43,6 +43,27 @@ verify、inbox claim 和 queue send。业务映射由 `webhooks.consume` 异步�
 
 ## Compatibility rules
 
+`billing?: { store: BillingStore }` enables `subscriptionSchedules`, `credits`, and `usage` services.
+`subscriptionAuthorizations.refresh(checkoutId)` polls a scoped checkout and reads its subscriptions
+through the configured adapter. A mapped canonical customer is currently required. Binding never
+grants access or marks payment succeeded. `runDue` is called by the host scheduler and reports each
+schedule/error separately. These optional workflows and their limitations are documented in
+[BILLING_WORKFLOWS.md](./BILLING_WORKFLOWS.md).
+
+Custom ApplicationStore implementations must add `insertResource`, an idempotent insert-only port
+that rejects mapping conflicts and cannot overwrite an existing snapshot. Apply D1 migration 0012
+when using D1BillingStore. Existing checkout/subscription snapshots need no destructive migration.
+
+2026-10 store upgrade: custom `ApplicationStore` implementations must implement
+`replaceResource(ResourceReplacement)`. Compare the current canonical `value.version` and scoped
+external mapping atomically, require `value.version === expectedVersion + 1`, and throw `conflict`
+without changing the snapshot when the comparison fails. Memory and D1 implement this port;
+existing D1 tables require no migration. Reconciliation stream checkpoints now include mode and
+restart after an empty terminal page; old checkpoints remain available for rollback.
+
+自定义 store 需要实现上述原子版本替换接口，不能用“先读取、后无条件写入”模拟。订阅更新冲突
+后重新对账，不盲重试远端写操作。内置 memory/D1 已适配，无需改宿主业务表。
+
 - New fields are additive and optional only when they do not alter state semantics.
 - Canonical status changes, SPI changes, store migration changes and provider capability changes need a
   changeset plus contract coverage.

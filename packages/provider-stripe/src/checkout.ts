@@ -73,7 +73,8 @@ function encode(command: ProviderCheckoutCommand): URLSearchParams {
     cancel_url: command.cancelUrl,
     client_reference_id: command.orderId,
   });
-  if (command.customerEmail !== undefined) body.set("customer_email", command.customerEmail);
+  if (command.externalCustomerId !== undefined) body.set("customer", command.externalCustomerId);
+  else if (command.customerEmail !== undefined) body.set("customer_email", command.customerEmail);
   if (command.discount !== undefined)
     body.set("discounts[0][coupon]", command.discount.externalDiscountId);
   for (const [key, value] of Object.entries(command.metadata)) body.set(`metadata[${key}]`, value);
@@ -108,6 +109,10 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const amountTotal = root.amount_total;
   return {
     externalId: stringField(root, "id", "stripe", "stripe.checkout.decode"),
+    externalSubscriptionIds:
+      optionalString(root, "subscription") === undefined
+        ? []
+        : [stringField(root, "subscription", "stripe", "stripe.checkout.decode")],
     ...(externalPaymentId === undefined ? {} : { externalPaymentId }),
     status,
     ...(url === undefined ? {} : { url }),

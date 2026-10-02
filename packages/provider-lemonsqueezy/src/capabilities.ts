@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -14,6 +15,9 @@ export function lemonCapabilities(context: ProviderContext): CapabilitySnapshot 
     adapterVersion: "0.1.0",
     providerApiVersion: LEMON_API_VERSION,
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "This operation is not implemented by the Polybill adapter; it is not a statement that the provider lacks this feature",
+      ),
       "checkout.hosted": { ...native, constraints: { maxItems: 1, quantity: 1, cancelUrl: false } },
       "checkout.ad_hoc_price": native,
       "checkout.multi_item": unsupportedCapability("A Lemon Squeezy checkout targets one variant"),
@@ -26,9 +30,30 @@ export function lemonCapabilities(context: ProviderContext): CapabilitySnapshot 
         ["Create a checkout for the mapped recurring variant"],
       ),
       "subscription.read": native,
+      "subscription.change_items": {
+        ...native,
+        constraints: {
+          timing: ["immediately"],
+          maxItems: 1,
+          simultaneousProductAndQuantity: false,
+          paymentProcessor: ["stripe"],
+          usageBasedQuantity: false,
+        },
+      },
+      "subscription.proration": native,
+      "subscription.clear_scheduled_change": {
+        ...native,
+        constraints: { kinds: ["cancel"], paymentProcessor: ["stripe"] },
+      },
+      "subscription.set_trial_end": { ...native, constraints: { paymentProcessor: ["stripe"] } },
       "subscription.pause": {
         ...native,
-        constraints: { timing: ["immediately"], invoiceBehavior: ["void"] },
+        constraints: {
+          timing: ["immediately"],
+          invoiceBehavior: ["void", "free"],
+          automaticResume: true,
+          paymentProcessor: ["stripe"],
+        },
       },
       "subscription.resume": native,
       "subscription.cancel": {

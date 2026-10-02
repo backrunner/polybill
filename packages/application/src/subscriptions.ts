@@ -1,17 +1,28 @@
+import type {
+  ProviderContext,
+  ProviderOperationResult,
+  ProviderSubscriptionSnapshot,
+} from "@polybill/adapter-kit";
 import {
   PolybillError,
   assertSubscriptionItemChangePolicy,
+  assertSubscriptionPausePolicy,
+  assertFutureSubscriptionDate,
   parseId,
+  validateBillingInterval,
   type CustomerId,
   type IdempotencyKey,
   type PriceId,
   type Subscription,
   type SubscriptionItemChangePolicy,
   type SubscriptionPausePolicy,
-  type SubscriptionStatus,
+  type SubscriptionScheduledChangeKind,
+  type SubscriptionTrialEnd,
+  type SubscriptionResumePolicy,
 } from "@polybill/core";
-import { requireExternalId } from "./resource-runtime.js";
 import type { ResourceRuntime } from "./resource-runtime.js";
+import { saveSubscription, subscriptionMapping } from "./subscription-snapshot.js";
+import { assertSubscriptionOutcome } from "./subscription-outcome.js";
 
 export interface CreateSubscriptionCommand {
   readonly idempotencyKey: IdempotencyKey;
@@ -21,6 +32,15 @@ export interface CreateSubscriptionCommand {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
+type Action =
+  | "read"
+  | "cancel"
+  | "change_items"
+  | "pause"
+  | "resume"
+  | "clear_scheduled_change"
+  | "set_trial_end";
+
 export class SubscriptionService {
   readonly #runtime: ResourceRuntime;
   constructor(runtime: ResourceRuntime) {
@@ -28,11 +48,8 @@ export class SubscriptionService {
   }
 
   async create(command: CreateSubscriptionCommand): Promise<Subscription> {
-    if (
-      command.items.length === 0 ||
-      command.items.some((item) => !Number.isSafeInteger(item.quantity) || item.quantity < 1)
-    )
-      throw new TypeError("Subscription items are invalid");
+    assertItems(command.items);
+    if (command.trial !== undefined) validateBillingInterval(command.trial);
     return this.#runtime.mutate({
       operation: "subscription.create",
       key: command.idempotencyKey,
@@ -40,139 +57,29 @@ export class SubscriptionService {
       decodeReplay: decodeSubscription,
       execute: async (context) => {
         await this.#runtime.requireCapability("subscription.create", context);
+        if (command.trial !== undefined)
+          await this.#runtime.requireCapability("subscription.trial", context);
         const port = this.#runtime.options.adapter.subscriptions?.create;
         if (port === undefined) throw unsupported("subscription.create");
-        const externalCustomerId = requireExternalId(
-          await mapping(this.#runtime, "customer", command.customerId),
-          "subscription.create",
-        );
-        const items = await Promise.all(
-          command.items.map(async (item) => ({
-            externalPriceId: requireExternalId(
-              await mapping(this.#runtime, "price", item.priceId),
-              "subscription.create",
-            ),
-            quantity: item.quantity,
-          })),
-        );
         const remote = await port(context, {
-          externalCustomerId,
-          items,
+          externalCustomerId: await subscriptionMapping(
+            this.#runtime,
+            "customer",
+            command.customerId,
+          ),
+          items: await this.#externalItems(command.items),
           ...(command.trial === undefined ? {} : { trial: command.trial }),
           metadata: command.metadata ?? {},
         });
-        const id = parseId<"SubscriptionId">(this.#runtime.options.ids.next("sub"), "sub");
-        const subscription = canonical(id, command.customerId, command.items, remote.value, 1);
-        await this.#runtime.options.store.commitResource({
-          tenantId: this.#runtime.options.tenantId,
-          connectionId: this.#runtime.options.connection.id,
-          provider: this.#runtime.options.connection.provider,
-          entityType: "subscription",
-          entityId: id,
-          externalId: remote.value.externalId,
-          value: subscription,
-          evidence: remote.evidence,
-          occurredAt: this.#runtime.options.clock.now(),
-        });
-        return subscription;
+        return saveSubscription(
+          this.#runtime,
+          parseId<"SubscriptionId">(this.#runtime.options.ids.next("sub"), "sub"),
+          command.customerId,
+          remote,
+          1,
+        );
       },
     });
-  }
-
-  async cancel(
-    id: Subscription["id"],
-    idempotencyKey: IdempotencyKey,
-    timing: "immediately" | "period_end",
-  ): Promise<Subscription> {
-    const current = await this.get(id);
-    if (current === undefined) throw notFound();
-    return this.#runtime.mutate({
-      operation: "subscription.cancel",
-      key: idempotencyKey,
-      payload: { id, timing },
-      decodeReplay: decodeSubscription,
-      execute: async (context) => {
-        await this.#runtime.requireCapability("subscription.cancel", context);
-        const port = this.#runtime.options.adapter.subscriptions?.cancel;
-        if (port === undefined) throw unsupported("subscription.cancel");
-        const externalId = requireExternalId(
-          await mapping(this.#runtime, "subscription", id),
-          "subscription.cancel",
-        );
-        const remote = await port(context, externalId, timing);
-        const updated = canonical(
-          id,
-          current.customerId,
-          current.items,
-          remote.value,
-          current.version + 1,
-        );
-        await this.#runtime.options.store.commitResource({
-          tenantId: this.#runtime.options.tenantId,
-          connectionId: this.#runtime.options.connection.id,
-          provider: this.#runtime.options.connection.provider,
-          entityType: "subscription",
-          entityId: id,
-          externalId,
-          value: updated,
-          evidence: remote.evidence,
-          occurredAt: this.#runtime.options.clock.now(),
-        });
-        return updated;
-      },
-    });
-  }
-
-  async changeItems(
-    id: Subscription["id"],
-    idempotencyKey: IdempotencyKey,
-    items: readonly { readonly priceId: PriceId; readonly quantity: number }[],
-    policy: SubscriptionItemChangePolicy,
-  ): Promise<Subscription> {
-    assertItems(items);
-    assertSubscriptionItemChangePolicy(policy);
-    const current = await this.get(id);
-    if (current === undefined) throw notFound();
-    return this.#runtime.mutate({
-      operation: "subscription.change_items",
-      key: idempotencyKey,
-      payload: { id, items, policy },
-      decodeReplay: decodeSubscription,
-      execute: async (context) => {
-        await this.#runtime.requireCapability("subscription.change_items", context);
-        const port = this.#runtime.options.adapter.subscriptions?.changeItems;
-        if (port === undefined) throw unsupported("subscription.change_items");
-        const externalId = requireExternalId(
-          await mapping(this.#runtime, "subscription", id),
-          "subscription.change_items",
-        );
-        const externalItems = await Promise.all(
-          items.map(async (item) => ({
-            externalPriceId: requireExternalId(
-              await mapping(this.#runtime, "price", item.priceId),
-              "subscription.change_items",
-            ),
-            quantity: item.quantity,
-          })),
-        );
-        const remote = await port(context, externalId, { items: externalItems, policy });
-        const updated = canonical(id, current.customerId, items, remote.value, current.version + 1);
-        await commit(this.#runtime, updated, externalId, remote.evidence);
-        return updated;
-      },
-    });
-  }
-
-  pause(
-    id: Subscription["id"],
-    idempotencyKey: IdempotencyKey,
-    policy: SubscriptionPausePolicy,
-  ): Promise<Subscription> {
-    return this.#lifecycle(id, idempotencyKey, "pause", policy);
-  }
-
-  resume(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
-    return this.#lifecycle(id, idempotencyKey, "resume");
   }
 
   get(id: Subscription["id"]): Promise<Subscription | undefined> {
@@ -183,201 +90,300 @@ export class SubscriptionService {
     );
   }
 
-  async refresh(id: Subscription["id"], idempotencyKey: IdempotencyKey): Promise<Subscription> {
-    const current = await this.get(id);
-    if (current === undefined) throw notFound();
-    return this.#runtime.mutate({
-      operation: "subscription.refresh",
-      key: idempotencyKey,
-      payload: { id },
-      decodeReplay: decodeSubscription,
-      execute: async (context) => {
-        await this.#runtime.requireCapability("subscription.read", context);
-        const port = this.#runtime.options.adapter.subscriptions?.get;
-        if (port === undefined) throw unsupported("subscription.read");
-        const externalId = requireExternalId(
-          await mapping(this.#runtime, "subscription", id),
-          "subscription.read",
-        );
-        const remote = await port(context, externalId);
-        const items = await Promise.all(
-          remote.value.items.map(async (item) => {
-            const canonicalId = await this.#runtime.options.store.findCanonicalId(
-              this.#runtime.options.tenantId,
-              this.#runtime.options.connection.id,
-              "price",
-              item.externalPriceId,
-            );
-            return {
-              priceId: requirePriceId(canonicalId),
-              quantity: item.quantity,
-            };
-          }),
-        );
-        const updated = canonical(id, current.customerId, items, remote.value, current.version + 1);
-        await commit(this.#runtime, updated, externalId, remote.evidence);
-        return updated;
-      },
+  refresh(id: Subscription["id"], key: IdempotencyKey): Promise<Subscription> {
+    return this.#update(id, key, "read", {}, async (context, externalId) => {
+      const port = this.#runtime.options.adapter.subscriptions?.get;
+      if (port === undefined) throw unsupported("subscription.read");
+      return port(context, externalId);
     });
   }
 
-  async #lifecycle(
+  cancel(
     id: Subscription["id"],
-    idempotencyKey: IdempotencyKey,
-    action: "pause" | "resume",
-    pausePolicy?: SubscriptionPausePolicy,
+    key: IdempotencyKey,
+    timing: "immediately" | "period_end",
   ): Promise<Subscription> {
-    const current = await this.get(id);
-    if (current === undefined) throw notFound();
-    const operation = `subscription.${action}` as const;
+    if (timing !== "immediately" && timing !== "period_end")
+      throw new TypeError("Invalid cancellation timing");
+    return this.#update(id, key, "cancel", { timing }, async (context, externalId, current) => {
+      const port = this.#runtime.options.adapter.subscriptions?.cancel;
+      if (port === undefined) throw unsupported("subscription.cancel");
+      const result = await port(context, externalId, timing);
+      assertSubscriptionOutcome(
+        result.value,
+        { action: "cancel", timing, previous: current.status },
+        context.clock.now(),
+        context.connection.provider,
+      );
+      return result;
+    });
+  }
+
+  changeItems(
+    id: Subscription["id"],
+    key: IdempotencyKey,
+    items: Subscription["items"],
+    policy: SubscriptionItemChangePolicy,
+  ): Promise<Subscription> {
+    assertItems(items);
+    assertSubscriptionItemChangePolicy(policy);
+    return this.#update(
+      id,
+      key,
+      "change_items",
+      { items, policy },
+      async (context, externalId, current) => {
+        const port = this.#runtime.options.adapter.subscriptions?.changeItems;
+        if (port === undefined) throw unsupported("subscription.change_items");
+        const desired = await this.#externalItems(items);
+        const remote = await port(context, externalId, { items: desired, policy });
+        const applied = sameItems(desired, remote.value.items);
+        const scheduled = remote.value.scheduledChange;
+        const alreadyCurrent =
+          items.length === current.items.length &&
+          items.every((item) =>
+            current.items.some(
+              (entry) => entry.priceId === item.priceId && entry.quantity === item.quantity,
+            ),
+          );
+        const confirmedSchedule =
+          policy.timing === "period_end" &&
+          scheduled?.kind === "items" &&
+          scheduled.items !== undefined &&
+          sameItems(desired, scheduled.items);
+        const confirmed =
+          policy.timing === "immediately"
+            ? applied
+            : confirmedSchedule || (applied && alreadyCurrent && scheduled?.kind !== "items");
+        if (!confirmed)
+          throw new PolybillError("Provider has not confirmed the requested subscription items", {
+            code: "outcome_unknown",
+            operation: "subscription.change_items",
+            retryable: false,
+          });
+        return remote;
+      },
+    );
+  }
+
+  pause(
+    id: Subscription["id"],
+    key: IdempotencyKey,
+    policy: SubscriptionPausePolicy,
+  ): Promise<Subscription> {
+    return this.#update(id, key, "pause", { policy }, async (context, externalId) => {
+      assertSubscriptionPausePolicy(policy, context.clock.now());
+      const port = this.#runtime.options.adapter.subscriptions?.pause;
+      if (port === undefined) throw unsupported("subscription.pause");
+      const result = await port(context, externalId, policy);
+      assertSubscriptionOutcome(
+        result.value,
+        { action: "pause", policy },
+        context.clock.now(),
+        context.connection.provider,
+      );
+      return result;
+    });
+  }
+
+  resume(
+    id: Subscription["id"],
+    key: IdempotencyKey,
+    policy?: SubscriptionResumePolicy,
+  ): Promise<Subscription> {
+    if (policy !== undefined && !["continue_current", "restart"].includes(policy.billingPeriod))
+      throw new TypeError("Invalid resume billing-period policy");
+    return this.#update(
+      id,
+      key,
+      "resume",
+      policy === undefined ? {} : { policy },
+      async (context, externalId) => {
+        const ports = this.#runtime.options.adapter.subscriptions;
+        const legacy = ports?.resume;
+        const explicit = ports?.resumeWithPolicy;
+        let result: ProviderOperationResult<ProviderSubscriptionSnapshot>;
+        if (policy === undefined) {
+          if (legacy === undefined) throw unsupported("subscription.resume");
+          result = await legacy(context, externalId);
+        } else {
+          if (explicit === undefined) throw unsupported("subscription.resume");
+          result = await explicit(context, externalId, policy);
+        }
+        assertSubscriptionOutcome(
+          result.value,
+          { action: "resume" },
+          context.clock.now(),
+          context.connection.provider,
+        );
+        return result;
+      },
+    );
+  }
+
+  clearScheduledChange(
+    id: Subscription["id"],
+    key: IdempotencyKey,
+    kind: SubscriptionScheduledChangeKind,
+  ): Promise<Subscription> {
+    if (!["cancel", "pause", "items"].includes(kind))
+      throw new TypeError("Invalid scheduled change kind");
+    return this.#update(
+      id,
+      key,
+      "clear_scheduled_change",
+      { kind },
+      async (context, externalId) => {
+        const port = this.#runtime.options.adapter.subscriptions?.clearScheduledChange;
+        if (port === undefined) throw unsupported("subscription.clear_scheduled_change");
+        const result = await port(context, externalId, kind);
+        assertSubscriptionOutcome(
+          result.value,
+          { action: "clear_scheduled_change", kind },
+          context.clock.now(),
+          context.connection.provider,
+        );
+        return result;
+      },
+    );
+  }
+
+  setTrialEnd(
+    id: Subscription["id"],
+    key: IdempotencyKey,
+    end: SubscriptionTrialEnd,
+  ): Promise<Subscription> {
+    return this.#update(id, key, "set_trial_end", { end }, async (context, externalId) => {
+      if (end !== "now") assertFutureSubscriptionDate(end, context.clock.now());
+      const port = this.#runtime.options.adapter.subscriptions?.setTrialEnd;
+      if (port === undefined) throw unsupported("subscription.set_trial_end");
+      const result = await port(context, externalId, end);
+      assertSubscriptionOutcome(
+        result.value,
+        { action: "set_trial_end", end },
+        context.clock.now(),
+        context.connection.provider,
+      );
+      return result;
+    });
+  }
+
+  #externalItems(items: Subscription["items"]) {
+    return Promise.all(
+      items.map(async (item) => ({
+        externalPriceId: await subscriptionMapping(this.#runtime, "price", item.priceId),
+        quantity: item.quantity,
+      })),
+    );
+  }
+
+  #update(
+    id: Subscription["id"],
+    key: IdempotencyKey,
+    action: Action,
+    payload: Readonly<Record<string, unknown>>,
+    run: (
+      context: ProviderContext,
+      externalId: string,
+      current: Subscription,
+    ) => Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>,
+  ): Promise<Subscription> {
+    const capability = `subscription.${action}` as const;
     return this.#runtime.mutate({
-      operation,
-      key: idempotencyKey,
-      payload: { id, action, ...(pausePolicy === undefined ? {} : { policy: pausePolicy }) },
+      operation: action === "read" ? "subscription.refresh" : capability,
+      key,
+      payload: { id, ...payload },
       decodeReplay: decodeSubscription,
       execute: async (context) => {
-        await this.#runtime.requireCapability(operation, context);
-        const subscriptions = this.#runtime.options.adapter.subscriptions;
-        const externalId = requireExternalId(
-          await mapping(this.#runtime, "subscription", id),
-          operation,
-        );
-        const remote = await lifecycleRemote(
-          subscriptions,
-          action,
-          context,
-          externalId,
-          pausePolicy,
-        );
-        const updated = canonical(
-          id,
-          current.customerId,
-          current.items,
-          remote.value,
-          current.version + 1,
-        );
-        await commit(this.#runtime, updated, externalId, remote.evidence);
-        return updated;
+        await this.#runtime.requireCapability(capability, context);
+        const current = await this.get(id);
+        if (current === undefined)
+          throw new PolybillError("Canonical subscription was not found", {
+            code: "not_found",
+            operation: capability,
+            retryable: false,
+          });
+        const externalId = await subscriptionMapping(this.#runtime, "subscription", id);
+        if (current.status === "canceled" && action !== "read" && action !== "cancel")
+          throw new PolybillError("A canceled subscription cannot return to a billable state", {
+            code: "invalid_request",
+            operation: capability,
+            provider: context.connection.provider,
+            retryable: false,
+          });
+        const remote = await run(context, externalId, current);
+        if (remote.value.externalId !== externalId)
+          throw new PolybillError("Subscription response ID mismatch", {
+            code: "provider_response_invalid",
+            operation: capability,
+            retryable: false,
+          });
+        try {
+          return await saveSubscription(
+            this.#runtime,
+            id,
+            current.customerId,
+            remote,
+            current.version + 1,
+            current,
+          );
+        } catch (error) {
+          if (
+            action !== "read" &&
+            error instanceof PolybillError &&
+            error.code === "conflict" &&
+            error.operation === "resource.replace"
+          )
+            throw new PolybillError(
+              "Subscription changed concurrently; reconcile before another mutation",
+              {
+                code: "outcome_unknown",
+                operation: capability,
+                provider: context.connection.provider,
+                retryable: false,
+              },
+            );
+          throw error;
+        }
       },
     });
   }
 }
 
-function canonical(
-  id: Subscription["id"],
-  customerId: CustomerId,
-  items: Subscription["items"],
-  remote: {
-    status: SubscriptionStatus | "unknown";
-    currentPeriodStart?: Subscription["currentPeriodStart"];
-    currentPeriodEnd?: Subscription["currentPeriodEnd"];
-    cancelAtPeriodEnd: boolean;
-    rawStatus: string;
-  },
-  version: number,
-): Subscription {
-  if (remote.status === "unknown")
-    throw new PolybillError("Provider returned an unknown subscription status", {
-      code: "provider_response_invalid",
-      operation: "subscription.decode",
-      retryable: false,
-    });
-  return {
-    id,
-    customerId,
-    status: remote.status,
-    items,
-    ...(remote.currentPeriodStart === undefined
-      ? {}
-      : { currentPeriodStart: remote.currentPeriodStart }),
-    ...(remote.currentPeriodEnd === undefined ? {} : { currentPeriodEnd: remote.currentPeriodEnd }),
-    ...(remote.cancelAtPeriodEnd && remote.currentPeriodEnd !== undefined
-      ? { scheduledChange: { kind: "cancel" as const, effectiveAt: remote.currentPeriodEnd } }
-      : {}),
-    version,
-    rawStatus: remote.rawStatus,
-  };
-}
-async function mapping(runtime: ResourceRuntime, type: string, id: string) {
-  return runtime.options.store.getExternalId(
-    runtime.options.tenantId,
-    runtime.options.connection.id,
-    type,
-    id,
-  );
-}
-async function commit(
-  runtime: ResourceRuntime,
-  subscription: Subscription,
-  externalId: string,
-  evidence: unknown,
-): Promise<void> {
-  await runtime.options.store.commitResource({
-    tenantId: runtime.options.tenantId,
-    connectionId: runtime.options.connection.id,
-    provider: runtime.options.connection.provider,
-    entityType: "subscription",
-    entityId: subscription.id,
-    externalId,
-    value: subscription,
-    evidence,
-    occurredAt: runtime.options.clock.now(),
-  });
-}
-function assertItems(items: readonly { readonly quantity: number }[]): void {
+function assertItems(items: Subscription["items"]): void {
   if (
     items.length === 0 ||
+    new Set(items.map((item) => item.priceId)).size !== items.length ||
     items.some((item) => !Number.isSafeInteger(item.quantity) || item.quantity < 1)
   )
     throw new TypeError("Subscription items are invalid");
 }
+
+function sameItems(
+  left: ProviderSubscriptionSnapshot["items"],
+  right: ProviderSubscriptionSnapshot["items"],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((item) =>
+      right.some(
+        (other) =>
+          other.externalPriceId === item.externalPriceId && other.quantity === item.quantity,
+      ),
+    )
+  );
+}
+
 function decodeSubscription(value: unknown): Subscription {
   if (typeof value !== "object" || value === null || !("id" in value) || !("items" in value))
     throw new TypeError("Stored subscription replay is invalid");
   return value as Subscription;
 }
-function unsupported(operation: string) {
+
+function unsupported(operation: string): PolybillError {
   return new PolybillError("Provider subscription capability is unavailable", {
     code: "unsupported_capability",
     operation,
     retryable: false,
   });
-}
-function notFound() {
-  return new PolybillError("Canonical subscription was not found", {
-    code: "not_found",
-    operation: "subscription.get",
-    retryable: false,
-  });
-}
-function requirePriceId(value: string | undefined): PriceId {
-  if (value === undefined)
-    throw new PolybillError("Provider subscription item has no canonical price mapping", {
-      code: "not_found",
-      operation: "subscription.read",
-      retryable: false,
-    });
-  return parseId<"PriceId">(value, "price");
-}
-
-function requirePausePolicy(policy: SubscriptionPausePolicy | undefined): SubscriptionPausePolicy {
-  if (policy === undefined) throw new TypeError("Pause policy is required");
-  return policy;
-}
-
-async function lifecycleRemote(
-  subscriptions: ResourceRuntime["options"]["adapter"]["subscriptions"],
-  action: "pause" | "resume",
-  context: Parameters<NonNullable<NonNullable<typeof subscriptions>["get"]>>[0],
-  externalId: string,
-  pausePolicy: SubscriptionPausePolicy | undefined,
-) {
-  if (action === "pause") {
-    const pause = subscriptions?.pause;
-    if (pause === undefined) throw unsupported("subscription.pause");
-    return pause(context, externalId, requirePausePolicy(pausePolicy));
-  }
-  const resume = subscriptions?.resume;
-  if (resume === undefined) throw unsupported("subscription.resume");
-  return resume(context, externalId);
 }

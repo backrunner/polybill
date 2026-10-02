@@ -381,7 +381,7 @@ describe("Stripe adapter contract", () => {
           id: "sub_fixture",
           customer: "cus_fixture",
           status: "active",
-          items: { data: [{ price: { id: "price_fixture" }, quantity: 2 }] },
+          items: { data: [{ id: "si_fixture", price: { id: "price_fixture" }, quantity: 2 }] },
           current_period_start: 1756080000,
           current_period_end: 1758758400,
           cancel_at_period_end: false,
@@ -537,6 +537,11 @@ describe("Stripe adapter contract", () => {
         response: Response.json({ ...active, pause_collection: { behavior: "void" } }),
       },
       {
+        method: "GET",
+        url: "https://api.stripe.com/v1/subscriptions/sub_fixture",
+        response: Response.json({ ...active, pause_collection: { behavior: "void" } }),
+      },
+      {
         method: "POST",
         url: "https://api.stripe.com/v1/subscriptions/sub_fixture",
         response: Response.json(active),
@@ -559,7 +564,9 @@ describe("Stripe adapter contract", () => {
         timing: "immediately",
         invoiceBehavior: "void",
       }),
-    ).resolves.toMatchObject({ value: { status: "paused" } });
+    ).resolves.toMatchObject({
+      value: { status: "active", collectionPause: { invoiceBehavior: "void" } },
+    });
     await expect(adapter.subscriptions?.resume?.(ctx, "sub_fixture")).resolves.toMatchObject({
       value: { status: "active" },
     });

@@ -5,6 +5,13 @@ export type {
   CreateCheckoutCommand,
   CreateCheckoutItem,
   CreateCheckoutResult,
+  BillingStore,
+  BillingScope,
+  BillingRecord,
+  CreditEntry,
+  SubscriptionAuthorization,
+  SubscriptionSchedule,
+  SubscriptionPhase,
 } from "@polybill/application";
 export type {
   Capability,

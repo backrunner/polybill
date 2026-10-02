@@ -99,7 +99,7 @@ export class ResourceRuntime {
     const payloadHash = await this.options.crypto.sha256(
       new TextEncoder().encode(stableStringify(input.payload)),
     );
-    const attempt = trackMutation(await this.context(input.key));
+    const context = await this.context(input.key);
     const claim = await this.options.store.claim(scope, payloadHash);
     if (claim.kind === "replay") return input.decodeReplay(claim.result);
     if (claim.kind === "conflict")
@@ -108,6 +108,11 @@ export class ResourceRuntime {
       throw commandError("conflict", input.operation, this.options.connection, true);
     if (claim.kind === "outcome_unknown")
       throw commandError("outcome_unknown", input.operation, this.options.connection, true);
+    let markerAttempted = false;
+    const attempt = trackMutation(context, async () => {
+      markerAttempted = true;
+      await this.options.store.markUnknown(scope, claim.leaseToken);
+    });
     let executed = false;
     try {
       const result = await input.execute(attempt.context);
@@ -115,6 +120,8 @@ export class ResourceRuntime {
       await this.options.store.complete(scope, claim.leaseToken, result);
       return result;
     } catch (error) {
+      // A failed marker write may itself have committed; never release or send again blindly.
+      if (markerAttempted) throw error;
       if (
         attempt.mayHaveMutated() ||
         executed ||

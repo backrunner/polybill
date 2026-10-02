@@ -11,6 +11,7 @@
     "build": "pnpm -r --workspace-concurrency=1 --if-present run build",
     "check:packages": "pnpm build && pnpm -r exec publint",
     "check:worker-bundle": "pnpm build && node scripts/check-worker-bundle.mjs",
+    "check:polar-api": "node scripts/check-polar-api.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",

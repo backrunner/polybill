@@ -1,6 +1,9 @@
 import {
   arrayField,
+  assertSubscriptionIdentity,
+  assertProviderSubscriptionItems,
   object,
+  subscriptionUnsupported,
   optionalString,
   stringField,
   type ProviderSubscriptionSnapshot,
@@ -8,6 +11,9 @@ import {
 } from "@polybill/adapter-kit";
 import {
   PolybillError,
+  assertSubscriptionPausePolicy,
+  assertSubscriptionItemChangePolicy,
+  assertFutureSubscriptionDate,
   parseIsoDateTime,
   type ConnectionId,
   type SubscriptionItemChangePolicy,
@@ -18,6 +24,107 @@ import { paddleRequest } from "./client.js";
 import { paddleResult } from "./result.js";
 
 export const paddleSubscriptions: SubscriptionProvider = {
+  async resumeWithPolicy(context, externalId, policy) {
+    if (policy.billingPeriod !== "continue_current" && policy.billingPeriod !== "restart")
+      throw new TypeError("Invalid resume billing-period policy");
+    return paddleResult(
+      context,
+      decode(
+        (
+          await paddleRequest(
+            context,
+            "POST",
+            `/subscriptions/${encodeURIComponent(externalId)}/resume`,
+            {
+              effective_from: "immediately",
+              on_resume:
+                policy.billingPeriod === "continue_current"
+                  ? "continue_existing_billing_period"
+                  : "start_new_billing_period",
+            },
+          )
+        ).json(),
+      ),
+    );
+  },
+  async setTrialEnd(context, externalId, end) {
+    if (end !== "now") {
+      assertFutureSubscriptionDate(end, context.clock.now());
+      if (Date.parse(end) - Date.parse(context.clock.now()) < 30 * 60 * 1000)
+        throw subscriptionUnsupported(
+          "paddle",
+          "Paddle trial end must be at least 30 minutes in the future",
+        );
+    }
+    const current = object(
+      object(
+        (
+          await paddleRequest(context, "GET", `/subscriptions/${encodeURIComponent(externalId)}`)
+        ).json(),
+        "paddle",
+        "paddle.subscription.read",
+      ).data,
+      "paddle",
+      "paddle.subscription.read",
+    );
+    assertSubscriptionIdentity(current.id, externalId, "paddle");
+    if (current.status !== "trialing")
+      throw subscriptionUnsupported(
+        "paddle",
+        "Only a trialing subscription can change its trial end",
+      );
+    if (end === "now") {
+      if (current.collection_mode !== "automatic")
+        throw subscriptionUnsupported(
+          "paddle",
+          "Immediate trial activation requires automatic collection",
+        );
+      return paddleResult(
+        context,
+        decode(
+          (
+            await paddleRequest(
+              context,
+              "POST",
+              `/subscriptions/${encodeURIComponent(externalId)}/activate`,
+              {},
+            )
+          ).json(),
+        ),
+      );
+    }
+    return update(context, externalId, {
+      next_billed_at: end,
+      proration_billing_mode: "do_not_bill",
+    });
+  },
+  async clearScheduledChange(context, externalId, kind) {
+    if (kind === "items")
+      throw subscriptionUnsupported("paddle", "Paddle item updates are immediate");
+    if (kind !== "cancel" && kind !== "pause") throw new TypeError("Invalid scheduled change");
+    const current = object(
+      object(
+        (
+          await paddleRequest(context, "GET", `/subscriptions/${encodeURIComponent(externalId)}`)
+        ).json(),
+        "paddle",
+        "paddle.subscription.read",
+      ).data,
+      "paddle",
+      "paddle.subscription.read",
+    );
+    assertSubscriptionIdentity(current.id, externalId, "paddle");
+    const scheduled =
+      current.scheduled_change == null
+        ? undefined
+        : object(current.scheduled_change, "paddle", "paddle.subscription.read");
+    if (scheduled !== undefined && scheduled.action !== kind)
+      throw subscriptionUnsupported(
+        "paddle",
+        "Pending Paddle change does not match the requested kind",
+      );
+    return update(context, externalId, { scheduled_change: null });
+  },
   async get(context, externalId) {
     return paddleResult(
       context,
@@ -29,6 +136,8 @@ export const paddleSubscriptions: SubscriptionProvider = {
     );
   },
   async changeItems(context, externalId, input) {
+    assertProviderSubscriptionItems(input.items);
+    assertSubscriptionItemChangePolicy(input.policy);
     assertItemChange(context.connection.id, input.policy);
     return update(context, externalId, {
       items: input.items.map((item) => ({
@@ -39,6 +148,7 @@ export const paddleSubscriptions: SubscriptionProvider = {
     });
   },
   async pause(context, externalId, policy) {
+    assertSubscriptionPausePolicy(policy, context.clock.now());
     assertPause(context.connection.id, policy);
     return paddleResult(
       context,
@@ -51,6 +161,7 @@ export const paddleSubscriptions: SubscriptionProvider = {
             {
               effective_from:
                 policy.timing === "immediately" ? "immediately" : "next_billing_period",
+              ...(policy.resumesAt === undefined ? {} : { resume_at: policy.resumesAt }),
             },
           )
         ).json(),
@@ -157,6 +268,14 @@ function decode(value: unknown): ProviderSubscriptionSnapshot {
     data.scheduled_change === null || data.scheduled_change === undefined
       ? undefined
       : object(data.scheduled_change, "paddle", "paddle.subscription.decode");
+  const resumesAt =
+    scheduled === undefined
+      ? undefined
+      : scheduled.action === "resume"
+        ? optionalString(scheduled, "effective_at")
+        : scheduled.action === "pause"
+          ? optionalString(scheduled, "resume_at")
+          : undefined;
   return {
     externalId: stringField(data, "id", "paddle", "paddle.subscription.decode"),
     externalCustomerId: stringField(data, "customer_id", "paddle", "paddle.subscription.decode"),
@@ -178,7 +297,30 @@ function decode(value: unknown): ProviderSubscriptionSnapshot {
       scheduled !== undefined &&
       scheduled.action === "cancel" &&
       scheduled.effective_at !== "immediately",
+    ...(scheduled === undefined ? {} : { scheduledChange: decodeScheduled(scheduled) }),
+    ...(resumesAt === undefined ? {} : { resumesAt: parseIsoDateTime(resumesAt) }),
+    ...(optionalString(data, "next_billed_at") === undefined || rawStatus !== "trialing"
+      ? {}
+      : {
+          trialEnd: parseIsoDateTime(
+            stringField(data, "next_billed_at", "paddle", "paddle.subscription.decode"),
+          ),
+        }),
     rawStatus,
+  };
+}
+
+function decodeScheduled(
+  value: Readonly<Record<string, unknown>>,
+): NonNullable<ProviderSubscriptionSnapshot["scheduledChange"]> {
+  const kind = value.action;
+  if (kind !== "cancel" && kind !== "pause" && kind !== "resume")
+    throw new TypeError("Unknown Paddle scheduled action");
+  return {
+    kind,
+    effectiveAt: parseIsoDateTime(
+      stringField(value, "effective_at", "paddle", "paddle.subscription.decode"),
+    ),
   };
 }
 

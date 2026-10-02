@@ -11,6 +11,7 @@ import {
   type WebhookProvider,
 } from "@polybill/adapter-kit";
 import { parseIsoDateTime } from "@polybill/core";
+import { supportsPolarWebhookVersion } from "./api-version.js";
 
 export const polarWebhooks: WebhookProvider = {
   async verify(input) {
@@ -46,6 +47,15 @@ export const polarWebhooks: WebhookProvider = {
   },
   decode(event) {
     const root = decodeRoot(event.rawBody);
+    if (!supportsPolarWebhookVersion(root.api_version))
+      return {
+        type: optionalString(root, "type") ?? "unknown",
+        // No resource ID: unreviewed contracts cannot enter a canonical resource mapping.
+        externalIds: {
+          ...(event.providerEventId === undefined ? {} : { event: event.providerEventId }),
+        },
+        payload: root,
+      };
     const payload = object(root.data, "polar", "polar.webhook.decode");
     const objectId = optionalString(payload, "id");
     const occurredAt =
@@ -61,7 +71,7 @@ export const polarWebhooks: WebhookProvider = {
     };
   },
   async map(event, context) {
-    const mapping = mappingFor(event.type);
+    const mapping = mappingFor(event.type, event.payload);
     const externalId = event.externalIds.object;
     if (mapping === undefined || externalId === undefined)
       return [
@@ -133,15 +143,32 @@ function decodeRoot(raw: Uint8Array) {
 
 function mappingFor(
   type: string,
+  payload: unknown,
 ): { readonly type: string; readonly aggregate: string } | undefined {
+  if (type === "subscription.revoked") {
+    const status = optionalString(object(payload, "polar", "polar.webhook.map"), "status");
+    return {
+      type:
+        status === "canceled" || status === "revoked"
+          ? "subscription.canceled.v1"
+          : "subscription.changed.v1",
+      aggregate: "subscription",
+    };
+  }
   const map: Readonly<Record<string, { readonly type: string; readonly aggregate: string }>> = {
     "checkout.updated": { type: "checkout.changed.v1", aggregate: "checkout" },
     "checkout.expired": { type: "checkout.expired.v1", aggregate: "checkout" },
     "order.paid": { type: "payment.succeeded.v1", aggregate: "order" },
+    "subscription.active": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.cycled": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.migrated": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.past_due": { type: "subscription.past_due.v1", aggregate: "subscription" },
+    "subscription.paused": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.resumed": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.uncanceled": { type: "subscription.changed.v1", aggregate: "subscription" },
     "subscription.created": { type: "subscription.created.v1", aggregate: "subscription" },
     "subscription.updated": { type: "subscription.changed.v1", aggregate: "subscription" },
     "subscription.canceled": { type: "subscription.changed.v1", aggregate: "subscription" },
-    "subscription.revoked": { type: "subscription.canceled.v1", aggregate: "subscription" },
     "refund.created": { type: "refund.created.v1", aggregate: "refund" },
   };
   return map[type];

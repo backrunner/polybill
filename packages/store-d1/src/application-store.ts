@@ -7,6 +7,7 @@ import type {
   IdempotencyClaim,
   IdempotencyScope,
   ResourceCommit,
+  ResourceReplacement,
   ReconciliationTarget,
   ReserveDiscountResult,
 } from "@polybill/application";
@@ -27,6 +28,8 @@ import { commitCheckoutToD1 } from "./checkout-commit.js";
 import { D1DiscountRedemptionStore } from "./discount-redemption-store.js";
 import { D1DiscountStore } from "./discount-store.js";
 import { createD1PersistenceAdapter, type D1PersistenceWriter } from "./persistence-adapter.js";
+import { replaceResource } from "./resource-replacement.js";
+import { insertResource } from "./resource-insertion.js";
 
 interface IdempotencyRow {
   readonly payload_hash: string;
@@ -247,6 +250,14 @@ export class D1ApplicationStore implements ApplicationStore {
 
   async commitResource(commit: ResourceCommit): Promise<void> {
     return this.commitResources([commit]);
+  }
+
+  insertResource(commit: ResourceCommit): Promise<void> {
+    return insertResource(this.#db, commit);
+  }
+
+  replaceResource(commit: ResourceReplacement): Promise<void> {
+    return replaceResource(this.#db, this.#writes, commit);
   }
 
   async commitResources(commits: readonly ResourceCommit[]): Promise<void> {

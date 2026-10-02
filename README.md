@@ -55,6 +55,12 @@ All adapters are currently `experimental`; capability snapshots report whether a
 Direct recurring mandate portability, provider-native license ownership, and financial-card issuance
 are intentionally outside the current contract.
 
+Polar requests default to `2026-10`; `createPolarAdapter({ apiVersion: "2027-01" })` selects the
+reviewed Next version. Every response must confirm the selected version. Set each Polar webhook
+endpoint's `api_version` separately; existing events retain their original version on redelivery.
+See the [Polar compatibility guide](./packages/provider-polar/README.md) for upgrades and drift
+checks.
+
 ## Architecture
 
 ```mermaid
@@ -73,6 +79,13 @@ flowchart LR
 The control-plane store is deliberately small. Polybill does not take over your user table or
 business order table. Use the memory store for tests and local experiments; use D1 (or another
 implementation of the store ports) for durable deployments.
+
+Custom stores must implement atomic `replaceResource` version checks for subscription snapshots.
+Reconciliation scans restart after an empty terminal page and keep report/projection checkpoints
+separate. See the [store upgrade contract](./.agents/PUBLIC_API.md#compatibility-rules).
+
+自定义 store 必须实现 `replaceResource`
+原子版本校验，防止旧订阅快照覆盖新状态。对账扫到空的末页后，下次调用会重新扫描；报告与修复使用独立进度。内置 memory/D1 已适配。
 
 ## Quick start
 
@@ -128,6 +141,20 @@ financial finality; reconcile the payment or consume verified provider evidence 
 fulfillment.
 
 ## Development and verification
+
+### Durable billing workflows / 持久化计费流程
+
+Pass `billing: { store: new MemoryBillingStore() }` for local tests or a `D1BillingStore` after
+applying migration `0012_billing_workflows.sql`. This enables `subscriptionSchedules`, `usage`, and
+`credits`. Call `subscriptionSchedules.runDue()` from your scheduler; local phases explicitly report
+their timing limitations. `subscriptionAuthorizations.refresh(checkoutId)` polls Stripe, Polar,
+Dodo, Creem or Paddle checkout references and binds subscriptions for an already mapped canonical
+customer. Checkout completion never grants fulfillment or proves payment finality.
+
+新增流程以租户、连接和环境隔离，包含可恢复排程、用量幂等和原子额度流水。D1 用户需执行新增迁移；自定义 ApplicationStore 需实现只插入、不覆盖的
+`insertResource`。本地额度不代表供应商钱包余额，meter 创建/事件接收也不自动配置计量价格。完整行为、恢复限制及剩余缺口见
+[billing workflow contract](.agents/BILLING_WORKFLOWS.md) 和
+[subscription coverage](.agents/SUBSCRIPTIONS_2026-10.md)。
 
 ```bash
 pnpm format:check

@@ -93,6 +93,12 @@ function mappingFor(
 ): { readonly type: string; readonly aggregate: string } | undefined {
   const map: Readonly<Record<string, { readonly type: string; readonly aggregate: string }>> = {
     "checkout.completed": { type: "checkout.completed.v1", aggregate: "checkout" },
+    "subscription.trialing": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.paused": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.update": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.scheduled_cancel": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.unpaid": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.expired": { type: "subscription.changed.v1", aggregate: "subscription" },
     "subscription.active": { type: "subscription.changed.v1", aggregate: "subscription" },
     "subscription.paid": { type: "payment.succeeded.v1", aggregate: "subscription" },
     "subscription.canceled": { type: "subscription.canceled.v1", aggregate: "subscription" },

@@ -9,6 +9,10 @@ import type {
   SubscriptionItemChangePolicy,
   SubscriptionPausePolicy,
   SubscriptionStatus,
+  SubscriptionCollectionPause,
+  SubscriptionScheduledChangeKind,
+  SubscriptionTrialEnd,
+  SubscriptionResumePolicy,
 } from "@polybill/core";
 import type { ProviderContext } from "./context.js";
 import type { ProviderOperationResult } from "./ports.js";
@@ -118,6 +122,8 @@ export interface CustomerProvider {
 export interface ProviderSubscriptionItem {
   readonly externalPriceId: string;
   readonly quantity: number;
+  readonly currentPeriodStart?: IsoDateTime;
+  readonly currentPeriodEnd?: IsoDateTime;
 }
 
 export interface ProviderSubscriptionSnapshot {
@@ -129,9 +135,32 @@ export interface ProviderSubscriptionSnapshot {
   readonly currentPeriodEnd?: IsoDateTime;
   readonly cancelAtPeriodEnd: boolean;
   readonly rawStatus: string;
+  readonly scheduledChange?: {
+    readonly kind: "cancel" | "pause" | "resume" | "items";
+    readonly effectiveAt: IsoDateTime;
+    readonly items?: readonly ProviderSubscriptionItem[];
+  };
+  readonly collectionPause?: SubscriptionCollectionPause;
+  readonly trialEnd?: IsoDateTime;
+  readonly resumesAt?: IsoDateTime;
 }
 
 export interface SubscriptionProvider {
+  resumeWithPolicy?(
+    context: ProviderContext,
+    externalId: string,
+    policy: SubscriptionResumePolicy,
+  ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
+  clearScheduledChange?(
+    context: ProviderContext,
+    externalId: string,
+    kind: SubscriptionScheduledChangeKind,
+  ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
+  setTrialEnd?(
+    context: ProviderContext,
+    externalId: string,
+    end: SubscriptionTrialEnd,
+  ): Promise<ProviderOperationResult<ProviderSubscriptionSnapshot>>;
   create?(
     context: ProviderContext,
     input: {

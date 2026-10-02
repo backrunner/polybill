@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -14,6 +15,9 @@ export function stripeCapabilities(context: ProviderContext): CapabilitySnapshot
     adapterVersion: "0.1.0",
     providerApiVersion: STRIPE_API_VERSION,
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "This operation is not implemented by the Polybill adapter; it is not a statement that the provider lacks this feature",
+      ),
       "checkout.hosted": native,
       "checkout.ad_hoc_price": native,
       "checkout.multi_item": native,
@@ -33,6 +37,16 @@ export function stripeCapabilities(context: ProviderContext): CapabilitySnapshot
       "customer.portal": native,
       "subscription.create": native,
       "subscription.read": native,
+      "subscription.bind_checkout": native,
+      "usage.meter": native,
+      "usage.ingest": {
+        ...native,
+        constraints: {
+          timestampWindowDays: 35,
+          invoiceFinality: false,
+          automaticUnknownRetry: false,
+        },
+      },
       "subscription.change_items": {
         ...native,
         constraints: {
@@ -46,13 +60,17 @@ export function stripeCapabilities(context: ProviderContext): CapabilitySnapshot
         constraints: {
           timing: ["immediately"],
           invoiceBehavior: ["void", "keep_draft", "mark_uncollectible"],
+          automaticResume: true,
         },
       },
       "subscription.resume": native,
       "subscription.cancel": native,
-      "subscription.trial": unsupportedCapability(
-        "Canonical intervals need an explicit conversion policy before using Stripe trial_period_days",
-      ),
+      "subscription.trial": {
+        ...native,
+        constraints: { units: ["day", "week"], maximumDays: 730 },
+      },
+      "subscription.clear_scheduled_change": { ...native, constraints: { kinds: ["cancel"] } },
+      "subscription.set_trial_end": native,
       "refund.partial": native,
       "refund.full": native,
       "discount.create": {

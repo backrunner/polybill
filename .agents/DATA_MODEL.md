@@ -1,5 +1,9 @@
 # Canonical 数据模型
 
+2026-10 subscription additions follow [the subscription compatibility contract](./SUBSCRIPTIONS_2026-10.md):
+observed scheduled changes/items, collection pause, trial end and automatic resume timestamps are
+optional additions to existing JSON snapshots. Current items are never replaced by a future request.
+
 ## 1. Primitive types
 
 ```ts
@@ -197,6 +201,7 @@ type SubscriptionStatus =
 interface ScheduledChange {
   readonly kind: "cancel" | "pause" | "resume" | "items";
   readonly effectiveAt: IsoDateTime;
+  readonly items?: readonly SubscriptionItem[];
 }
 ```
 
@@ -214,12 +219,15 @@ interface SubscriptionPausePolicy {
     | "stop_billing"
     | "void"
     | "keep_draft"
-    | "mark_uncollectible";
+    | "mark_uncollectible"
+    | "free";
+  readonly resumesAt?: IsoDateTime;
 }
 ```
 
 `period_end + prorate_immediately` 是矛盾组合，必须在 transport 前拒绝。`stop_billing` 表示暂停期
-不生成账单；其余三种表示 provider 仍生成账单但分别作废、保留草稿或标记不可收取。adapter 只有
+不生成账单；`void`、`keep_draft`、`mark_uncollectible` 表示 provider 仍生成账单但分别作废、保留草稿或标记不可收取。
+`free` 表示提供商的免费暂停收款语义。adapter 只有
 在 provider 同时匹配 timing、proration 和 invoice behavior 时才能声明 `native/exact`；例如仅有
 “暂停收款”但 subscription billing period 继续推进的 API，不能冒充 `stop_billing`。
 
@@ -340,6 +348,13 @@ interface CanonicalBillingEvent<TType extends string, TData> {
 `entitlement.granted.v1`。schema version 属于 envelope/data，不跟随 provider API version。
 
 ## 9. Control-plane schema
+
+Migration `0012_billing_workflows.sql` adds scoped `polybill_billing_records` CAS state and immutable
+`polybill_credit_entries`. Credit balances are decimal integer strings with a per-account monotonic
+revision, committed atomically with each entry. They are not provider wallet balances or fiat Money.
+`BillingRate` stores fractional minor-unit strings separately from Money and extends before rounding.
+`UsageMeter` / `UsageEvent` have branded IDs. Detailed contracts and current integration limits are
+in [BILLING_WORKFLOWS.md](./BILLING_WORKFLOWS.md).
 
 官方 store 至少实现以下逻辑表：
 

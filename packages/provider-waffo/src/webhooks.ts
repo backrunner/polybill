@@ -56,14 +56,18 @@ export const waffoWebhooks: WebhookProvider = {
   decode(event) {
     const root = decodeRoot(event.rawBody);
     const payload = object(root.data, "waffo", "waffo.webhook.decode");
+    const type = stringField(root, "eventType", "waffo", "waffo.webhook.decode");
+    const order = optionalString(payload, "orderId");
+    const externalId =
+      type.startsWith("subscription.") && type !== "subscription.payment_succeeded"
+        ? order
+        : stringField(root, "eventId", "waffo", "waffo.webhook.decode");
     return {
-      type: stringField(root, "eventType", "waffo", "waffo.webhook.decode"),
+      type,
       externalIds: {
         event: event.deliveryKey,
-        object: stringField(root, "eventId", "waffo", "waffo.webhook.decode"),
-        ...(optionalString(payload, "orderId") === undefined
-          ? {}
-          : { order: optionalString(payload, "orderId") ?? "" }),
+        ...(externalId === undefined ? {} : { object: externalId }),
+        ...(order === undefined ? {} : { order }),
       },
       occurredAt: parseIsoDateTime(stringField(root, "timestamp", "waffo", "waffo.webhook.decode")),
       payload,
@@ -115,6 +119,18 @@ function mappingFor(
   const map: Readonly<Record<string, { readonly type: string; readonly aggregate: string }>> = {
     "order.completed": { type: "payment.succeeded.v1", aggregate: "payment" },
     "subscription.activated": { type: "subscription.created.v1", aggregate: "subscription" },
+    "subscription.renewed": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.recovered": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.uncanceled": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.plan_changed": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.plan_change_scheduled": {
+      type: "subscription.changed.v1",
+      aggregate: "subscription",
+    },
+    "subscription.plan_change_failed": {
+      type: "subscription.changed.v1",
+      aggregate: "subscription",
+    },
     "subscription.payment_succeeded": { type: "payment.succeeded.v1", aggregate: "payment" },
     "subscription.canceling": { type: "subscription.changed.v1", aggregate: "subscription" },
     "subscription.canceled": { type: "subscription.canceled.v1", aggregate: "subscription" },

@@ -83,7 +83,7 @@ customer.read/create/update/delete/portal
 checkout.hosted/embedded/ad_hoc_price/multi_item/discount/tax
 order.read/list
 payment.one_time/payment.asset_settlement/refund.partial/refund.full/dispute.read
-subscription.create/read/list/change_items/pause/resume/cancel/proration/trial/mandate
+subscription.create/read/list/change_items/pause/resume/cancel/clear_scheduled_change/set_trial_end/proration/trial/mandate
 commercial.merchant_of_record/tax_calculation/tax_invoice/dispute_responsibility
 discount.create/redeem
 
@@ -135,6 +135,22 @@ type Capability =
 
 Snapshot 包含 `adapterVersion`、`providerApiVersion`、`commercialTerms`、`observedAt` 和可选
 `expiresAt`。静态声明与账户级动态 capability 合并，例如某账户未开通特定 payment method。
+
+Polar 使用 `YYYY-MM` API 版本。adapter 默认固定 `Polar-Version: 2026-10`，支持显式选择已审查的 `2027-01`，包括 test/live、
+mutation、read-back、reconcile 和 migration scan；capability 必须报告同一值。成功响应必须
+回显相同 `Polar-Version`，缺失或不一致时 GET 返回 `provider_response_invalid`，mutation 返回
+`outcome_unknown`，不得重新 POST 或移除 header 降级。版本被移除时的 404 不触发版本回退。
+版本升级必须先比较官方 schema 和 fixtures；允许显式选择已适配的 `2027-01`，每个 adapter
+实例固定自己的版本，不接受任意日期或 `current`/`next` 动态配置。
+
+订阅操作与新增 snapshot 字段遵循 [2026-10 订阅兼容契约](./SUBSCRIPTIONS_2026-10.md)。
+
+The optional usage port creates native meters and ingests scoped canonical events. Dodo's read-back
+must match the complete event before recovering an unknown result. Stripe/Polar unknown ingestion
+is not automatically replayed. `subscription.bind_checkout` identifies subscription references only
+through an authoritative checkout/payment read; it does not imply direct subscription creation or
+payment finality. `subscription.schedule` is an explicit facade emulation when BillingStore and the
+underlying item-change/read capabilities are configured. See [billing workflows](./BILLING_WORKFLOWS.md).
 
 ## 4. Example resource contract
 

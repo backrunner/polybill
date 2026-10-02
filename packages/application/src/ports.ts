@@ -107,9 +107,18 @@ export interface ResourceCommit {
 }
 
 export interface CanonicalResourceStore {
+  /** Idempotent insert that never replaces an existing canonical snapshot. */
+  insertResource(commit: ResourceCommit): Promise<void>;
+  replaceResource(commit: ResourceReplacement): Promise<void>;
   commitResource(commit: ResourceCommit): Promise<void>;
   commitResources(commits: readonly ResourceCommit[]): Promise<void>;
   getResource<T>(tenantId: TenantId, entityType: string, entityId: string): Promise<T | undefined>;
+}
+
+export interface ResourceReplacement extends ResourceCommit {
+  readonly externalId: string;
+  readonly expectedVersion: number;
+  readonly value: { readonly version: number };
 }
 
 export interface CheckoutCommit {

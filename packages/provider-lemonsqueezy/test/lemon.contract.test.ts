@@ -145,11 +145,21 @@ describe("Lemon Squeezy webhook contract", () => {
         response: Response.json(subscription),
       },
       {
+        method: "GET",
+        url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
+        response: Response.json(subscription),
+      },
+      {
         method: "PATCH",
         url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
         response: Response.json(
           jsonApi("subscriptions", "84", { ...subscription.data.attributes, status: "paused" }),
         ),
+      },
+      {
+        method: "GET",
+        url: "https://api.lemonsqueezy.com/v1/subscriptions/84",
+        response: Response.json(subscription),
       },
       {
         method: "PATCH",

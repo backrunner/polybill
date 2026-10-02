@@ -6,15 +6,28 @@ import {
   type ProviderContext,
 } from "@polybill/adapter-kit";
 import { PolybillError } from "@polybill/core";
+import { POLAR_API_VERSION, assertPolarApiVersion, type PolarApiVersion } from "./api-version.js";
 
-export const POLAR_API_VERSION = "2026-04";
+export type PolarRequest = (
+  context: ProviderContext,
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+) => Promise<HttpResponse>;
+
+export function createPolarRequest(apiVersion: PolarApiVersion): PolarRequest {
+  assertPolarApiVersion(apiVersion);
+  return (context, method, path, body) => polarRequest(context, method, path, body, apiVersion);
+}
 
 export async function polarRequest(
   context: ProviderContext,
   method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
+  apiVersion: PolarApiVersion = POLAR_API_VERSION,
 ): Promise<HttpResponse> {
+  assertPolarApiVersion(apiVersion);
   assertCredentialEnvironment(context, "polar.authenticate");
   const token = context.credentials.accessToken;
   if (token === undefined || token.length < 8)
@@ -41,6 +54,7 @@ export async function polarRequest(
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
+      "Polar-Version": apiVersion,
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(key === undefined ? {} : { "Idempotency-Key": key }),
     },
@@ -64,6 +78,15 @@ export async function polarRequest(
       provider: "polar",
       connectionId: context.connection.id,
       retryable: response.status === 429 || response.status >= 500,
+    });
+  if (response.headers.get("Polar-Version") !== apiVersion)
+    throw new PolybillError("Polar response did not confirm the pinned API version", {
+      code: method === "GET" ? "provider_response_invalid" : "outcome_unknown",
+      operation: "polar.request.version",
+      provider: "polar",
+      connectionId: context.connection.id,
+      providerCode: "api_version_mismatch",
+      retryable: false,
     });
   return response;
 }

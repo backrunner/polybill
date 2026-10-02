@@ -26,6 +26,12 @@ must compare a new sanitized response/signature fixture with the current codec a
 Unknown events are persisted and acknowledged; changed required fields fail reconciliation rather than
 silently dropping data.
 
+For Polar, review the [API changelog](https://polar.sh/docs/changelog/api) during the first week of
+January, April, July and October and before each Polybill release. Run the opt-in
+`pnpm check:polar-api` and `pnpm check:polar-api -- 2027-01` schema comparisons, then follow
+[the upgrade procedure](./POLAR_API_2026-10.md).
+Never automatically advance the pin to Current/Next or interpret a missing credential as sandbox proof.
+
 ## Changesets and commits
 
 Public canonical/API/SPI changes need a focused changeset. Commits use the repository identity

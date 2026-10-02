@@ -1,6 +1,7 @@
+import { createSign } from "node:crypto";
 import { signRsaSha256, utf8 } from "@polybill/adapter-kit";
-import { parseIsoDateTime } from "@polybill/core";
-import { describe, expect, it } from "vitest";
+import { parseId, parseIsoDateTime } from "@polybill/core";
+import { describe, expect, it, vi } from "vitest";
 import { createWaffoAdapter } from "../src/index.js";
 
 const privateKey = `-----BEGIN PRIVATE KEY-----
@@ -43,6 +44,80 @@ ZwIDAQAB
 -----END PUBLIC KEY-----`;
 
 describe("Waffo webhook contract", () => {
+  it.each([
+    ["subscription.renewed", "subscription.changed.v1"],
+    ["subscription.recovered", "subscription.changed.v1"],
+    ["subscription.canceling", "subscription.changed.v1"],
+    ["subscription.uncanceled", "subscription.changed.v1"],
+    ["subscription.past_due", "subscription.past_due.v1"],
+    ["subscription.plan_changed", "subscription.changed.v1"],
+    ["subscription.plan_change_scheduled", "subscription.changed.v1"],
+    ["subscription.plan_change_failed", "subscription.changed.v1"],
+  ])("correlates %s with the subscription order", async (type, expected) => {
+    const adapter = createWaffoAdapter();
+    const input = signedInput(type, {
+      orderId: "ORD_subscription",
+      orderStatus: type === "subscription.plan_change_failed" ? "canceled" : "active",
+    });
+    const verified = await adapter.webhooks.verify(input);
+    const decoded = adapter.webhooks.decode(verified);
+    expect(decoded.externalIds.object).toBe("ORD_subscription");
+    const ctx = mapContext();
+    const events = await adapter.webhooks.map(decoded, ctx);
+    expect(events[0]).toMatchObject({
+      type: expected,
+      aggregate: { type: "subscription", id: "sub_canonical" },
+    });
+    expect(ctx.lookup.findCanonicalId).toHaveBeenCalledWith({
+      tenantId: ctx.tenantId,
+      connectionId: ctx.connection.id,
+      entityType: "subscription",
+      externalId: "ORD_subscription",
+    });
+    expect((await adapter.webhooks.verify(input)).deliveryKey).toBe(verified.deliveryKey);
+    await expect(
+      adapter.webhooks.verify({
+        ...input,
+        rawBody: utf8(new TextDecoder().decode(input.rawBody) + " "),
+      }),
+    ).rejects.toMatchObject({ code: "signature_invalid" });
+  });
+
+  it.each([{}, { orderId: "ORD_unmapped_new_plan", orderStatus: "canceled" }])(
+    "keeps a missing or unmapped plan-change order as evidence without guessing a predecessor",
+    async (data) => {
+      const adapter = createWaffoAdapter();
+      const decoded = adapter.webhooks.decode(
+        await adapter.webhooks.verify(signedInput("subscription.plan_change_failed", data)),
+      );
+      const events = await adapter.webhooks.map(decoded, mapContext());
+      expect(events[0]).toMatchObject({
+        type: "unmapped_provider_event.v1",
+        aggregate: { type: "connection" },
+      });
+    },
+  );
+
+  it("keeps subscription charges attached to the payment ID", async () => {
+    const adapter = createWaffoAdapter();
+    const decoded = adapter.webhooks.decode(
+      await adapter.webhooks.verify(
+        signedInput(
+          "subscription.payment_succeeded",
+          { orderId: "ORD_subscription" },
+          "PAY_charge",
+        ),
+      ),
+    );
+    const ctx = mapContext();
+    const events = await adapter.webhooks.map(decoded, ctx);
+    expect(decoded.externalIds).toMatchObject({ object: "PAY_charge", order: "ORD_subscription" });
+    expect(events[0]).toMatchObject({
+      type: "payment.succeeded.v1",
+      aggregate: { type: "payment", id: "pay_canonical" },
+    });
+  });
+
   it("keeps different lifecycle events with the same business entity ID", async () => {
     const adapter = createWaffoAdapter();
     const keys: string[] = [];
@@ -100,3 +175,62 @@ describe("Waffo webhook contract", () => {
     });
   });
 });
+
+function signedInput(type: string, data: Readonly<Record<string, unknown>>, paymentId?: string) {
+  const now = parseIsoDateTime("2026-10-02T00:00:00.000Z");
+  const timestamp = Date.parse(now);
+  const eventId =
+    paymentId ??
+    (type === "subscription.renewed"
+      ? "ORD_subscription-renewed-2026-11-02"
+      : [
+            "subscription.recovered",
+            "subscription.canceling",
+            "subscription.uncanceled",
+            "subscription.past_due",
+          ].includes(type)
+        ? `ORD_subscription-${now}`
+        : "ORD_subscription");
+  const body = JSON.stringify({
+    id: eventId,
+    eventId,
+    eventType: type,
+    mode: "test",
+    timestamp: now,
+    data,
+  });
+  const signature = createSign("RSA-SHA256")
+    .update(`${timestamp}.${body}`)
+    .sign(privateKey, "base64");
+  return {
+    rawBody: utf8(body),
+    headers: new Headers({ "x-waffo-signature": `t=${timestamp},v1=${signature}` }),
+    secret: { active: publicKey, activeKeyId: "fixture" },
+    environment: "test" as const,
+    now,
+  };
+}
+
+function mapContext() {
+  const tenantId = parseId<"TenantId">("ten_waffofixture", "ten");
+  return {
+    tenantId,
+    connection: {
+      tenantId,
+      id: parseId<"ConnectionId">("conn_waffofixture", "conn"),
+      provider: "waffo" as const,
+      environment: "test" as const,
+    },
+    observedAt: parseIsoDateTime("2026-10-02T00:00:00.000Z"),
+    lookup: {
+      findCanonicalId: vi.fn(
+        async ({ entityType, externalId }: { entityType: string; externalId: string }) => {
+          if (entityType === "subscription" && externalId === "ORD_subscription")
+            return "sub_canonical";
+          if (entityType === "payment" && externalId === "PAY_charge") return "pay_canonical";
+          return undefined;
+        },
+      ),
+    },
+  };
+}

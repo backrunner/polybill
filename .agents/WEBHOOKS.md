@@ -61,6 +61,14 @@ Request
 准确的 header parsing 和 timestamp tolerance 只在 provider adapter 中实现；统一 handler 不做
 “猜算法”。所有 secret 支持 active + previous key overlap，rotation 完成后再删除旧 key。
 
+Polar endpoint 的 `api_version` 独立于请求的 `Polar-Version`，需要在 Polar 中显式设置为
+`2026-10`、`2027-01`。版本判断使用验签后的 raw JSON `api_version`，不信任未签名的
+`webhook-api-version` header。兼容 `2026-04` 与无版本的历史 payload，因为已创建事件的重投
+保留原版本；未知或格式错误的版本不解读 resource 字段、不查 mapping，只产生
+`unmapped_provider_event.v1` 并保留 raw inbox evidence。未来适配后可从原始 evidence 重放。
+验签和 inbox 持久化仍先于版本判断，不因未知版本拒绝接收。secret 的新旧签名算法按 secret
+生成方式兼容，与 API 日期无关；升级 API 不能自动轮换已有 endpoint secret。
+
 不能用 `event type + resource ID` 作为通用去重键；同一 subscription 会合法产生多次同类型更新。
 如果 provider（例如 Lemon Squeezy 当前 webhook）不提供独立 delivery ID，adapter 使用
 `<provider>:sha256(rawBody)`。相同 bytes 的合法重复投影为同一事实；不同 payload 生成不同 key，

@@ -5,6 +5,7 @@ import type {
   IdempotencyClaim,
   IdempotencyScope,
   ResourceCommit,
+  ResourceReplacement,
   ReconciliationTarget,
   ReserveDiscountResult,
 } from "@polybill/application";
@@ -172,6 +173,64 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
       );
   }
 
+  async insertResource(commit: ResourceCommit): Promise<void> {
+    const key = `${commit.tenantId}:${commit.entityType}:${commit.entityId}`;
+    if (commit.externalId !== undefined) {
+      const mapped = this.#mappings.get(
+        `${commit.tenantId}:${commit.connectionId}:${commit.entityType}:${commit.entityId}`,
+      );
+      const reverse = this.#reverseMappings.get(
+        `${commit.tenantId}:${commit.connectionId}:${commit.entityType}:${commit.externalId}`,
+      );
+      if (
+        (mapped !== undefined && mapped !== commit.externalId) ||
+        (reverse !== undefined && reverse !== commit.entityId)
+      )
+        throw new PolybillError("Resource mapping conflicts with existing identity", {
+          code: "conflict",
+          operation: "resource.insert",
+          retryable: false,
+        });
+      this.seedMapping(
+        commit.tenantId,
+        commit.connectionId,
+        commit.entityType,
+        commit.entityId,
+        commit.externalId,
+      );
+    }
+    if (!this.#resources.has(key))
+      this.#resources.set(key, globalThis.structuredClone(commit.value));
+  }
+
+  async replaceResource(commit: ResourceReplacement): Promise<void> {
+    const key = `${commit.tenantId}:${commit.entityType}:${commit.entityId}`;
+    const current = this.#resources.get(key);
+    if (
+      !Number.isSafeInteger(commit.expectedVersion) ||
+      commit.expectedVersion < 1 ||
+      !Number.isSafeInteger(commit.value.version) ||
+      commit.value.version !== commit.expectedVersion + 1
+    )
+      throw new TypeError("Invalid resource replacement version");
+    if (
+      typeof current !== "object" ||
+      current === null ||
+      !("version" in current) ||
+      current.version !== commit.expectedVersion ||
+      this.#mappings.get(
+        `${commit.tenantId}:${commit.connectionId}:${commit.entityType}:${commit.entityId}`,
+      ) !== commit.externalId
+    )
+      throw new PolybillError("Canonical resource changed before replacement", {
+        code: "conflict",
+        operation: "resource.replace",
+        provider: commit.provider,
+        retryable: true,
+      });
+    this.#resources.set(key, globalThis.structuredClone(commit.value));
+  }
+
   async commitResources(commits: readonly ResourceCommit[]): Promise<void> {
     for (const commit of commits) await this.commitResource(commit);
   }
@@ -235,7 +294,11 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
 
   async commitCheckout(commit: CheckoutCommit): Promise<void> {
     const checkoutKey = `${commit.tenantId}:${commit.checkout.id}`;
-    const mappingKey = `${commit.connectionId}:${commit.externalCheckoutId}`;
+    const mappingKey = JSON.stringify([
+      commit.tenantId,
+      commit.connectionId,
+      commit.externalCheckoutId,
+    ]);
     const previous = this.#commits.find(
       (item) => item.tenantId === commit.tenantId && item.checkout.id === commit.checkout.id,
     );
@@ -245,7 +308,11 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
     }
     if (this.#checkouts.has(checkoutKey)) throw new Error("Checkout already exists");
     if (
-      this.#commits.some((item) => `${item.connectionId}:${item.externalCheckoutId}` === mappingKey)
+      this.#commits.some(
+        (item) =>
+          JSON.stringify([item.tenantId, item.connectionId, item.externalCheckoutId]) ===
+          mappingKey,
+      )
     ) {
       throw new Error("External checkout mapping already exists");
     }
@@ -263,6 +330,13 @@ export class MemoryStore extends MemoryDiscountStore implements ApplicationStore
     )
       throw new Error("Discount reservation cannot be finalized");
     this.#checkouts.set(checkoutKey, globalThis.structuredClone(commit.checkout));
+    this.seedMapping(
+      commit.tenantId,
+      commit.connectionId,
+      "checkout",
+      commit.checkout.id,
+      commit.externalCheckoutId,
+    );
     this.#resources.set(
       `${commit.tenantId}:order:${commit.order.id}`,
       globalThis.structuredClone(commit.order),

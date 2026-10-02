@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -14,6 +15,9 @@ export function waffoCapabilities(context: ProviderContext): CapabilitySnapshot 
     adapterVersion: "0.1.0",
     providerApiVersion: WAFFO_API_VERSION,
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "Waffo merchant subscription lifecycle integration is not implemented; customer reactivation requires session authorization and canonical read-back bindings are not yet verified",
+      ),
       "checkout.hosted": { ...native, constraints: { maxItems: 1, quantity: 1, cancelUrl: false } },
       "checkout.ad_hoc_price": {
         ...native,

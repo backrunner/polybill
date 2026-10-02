@@ -15,6 +15,7 @@ import type {
 import type { CapabilitySnapshot } from "./capabilities.js";
 import type { ProviderContext } from "./context.js";
 import type { ProviderMigrationSource } from "./migration.js";
+import type { UsageProvider } from "./usage-ports.js";
 import type {
   CatalogProvider,
   CustomerProvider,
@@ -62,6 +63,7 @@ export interface ProviderCheckoutLine {
 export interface ProviderCheckoutCommand {
   readonly orderId: OrderId;
   readonly customerId?: CustomerId;
+  readonly externalCustomerId?: string;
   readonly customerEmail?: string;
   readonly lines: readonly ProviderCheckoutLine[];
   readonly grossTotal: Money;
@@ -79,6 +81,7 @@ export interface ProviderCheckoutCommand {
 
 export interface ProviderCheckoutSnapshot {
   readonly externalId: string;
+  readonly externalSubscriptionIds?: readonly string[];
   /** Provider payment/transaction identifier when available at checkout creation/read-back. */
   readonly externalPaymentId?: string;
   readonly status: "open" | "complete" | "expired" | "canceled" | "unknown";
@@ -187,6 +190,7 @@ export interface ProviderAdapter {
   readonly subscriptions?: SubscriptionProvider;
   readonly refunds?: RefundProvider;
   readonly discounts?: DiscountProvider;
+  readonly usage?: UsageProvider;
   readonly migration?: ProviderMigrationSource;
   readonly webhooks: WebhookProvider;
   readonly reconcile: ReconcileProvider;

@@ -55,6 +55,9 @@ async function create(
   const response = await paddleRequest(context, "POST", "/transactions", {
     items,
     collection_mode: "automatic",
+    ...(command.externalCustomerId === undefined
+      ? {}
+      : { customer_id: command.externalCustomerId }),
     custom_data: { ...command.metadata, polybill_order_id: command.orderId },
   });
   return {
@@ -88,6 +91,10 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
   const url = checkout === undefined ? undefined : optionalString(checkout, "url");
   return {
     externalId: stringField(data, "id", "paddle", "paddle.transaction.decode"),
+    externalSubscriptionIds:
+      optionalString(data, "subscription_id") === undefined
+        ? []
+        : [stringField(data, "subscription_id", "paddle", "paddle.transaction.decode")],
     externalPaymentId: stringField(data, "id", "paddle", "paddle.transaction.decode"),
     status,
     ...(url === undefined ? {} : { url }),

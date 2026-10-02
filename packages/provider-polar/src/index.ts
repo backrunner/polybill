@@ -1,12 +1,22 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { polarCapabilities } from "./capabilities.js";
-import { polarCheckout } from "./checkout.js";
-import { polarCustomers } from "./customers.js";
-import { polarSubscriptions } from "./subscriptions.js";
+import { createPolarCheckout } from "./checkout.js";
+import { createPolarCustomers } from "./customers.js";
+import { createPolarSubscriptions } from "./subscriptions.js";
 import { polarWebhooks } from "./webhooks.js";
-import { polarMigration } from "./migration.js";
+import { createPolarMigration } from "./migration.js";
+import { createPolarUsage } from "./usage.js";
+import { createPolarRequest } from "./client.js";
+import { POLAR_API_VERSION, type PolarApiVersion } from "./api-version.js";
 
-export function createPolarAdapter(): ProviderAdapter {
+export interface PolarAdapterOptions {
+  readonly apiVersion?: PolarApiVersion;
+}
+
+export function createPolarAdapter(options: PolarAdapterOptions = {}): ProviderAdapter {
+  const apiVersion = options.apiVersion ?? POLAR_API_VERSION;
+  const request = createPolarRequest(apiVersion);
+  const checkout = createPolarCheckout(request);
   return {
     descriptor: {
       name: "polar",
@@ -14,15 +24,16 @@ export function createPolarAdapter(): ProviderAdapter {
       adapterVersion: "0.1.0",
       maturity: "experimental",
     },
-    getCapabilities: async (context) => polarCapabilities(context),
-    customers: polarCustomers,
-    checkout: polarCheckout,
-    subscriptions: polarSubscriptions,
-    migration: polarMigration,
+    getCapabilities: async (context) => polarCapabilities(context, apiVersion),
+    customers: createPolarCustomers(request),
+    checkout,
+    subscriptions: createPolarSubscriptions(request),
+    migration: createPolarMigration(request),
+    usage: createPolarUsage(request),
     webhooks: polarWebhooks,
     reconcile: {
       async checkout(context, externalId) {
-        const snapshot = await polarCheckout.get(context, externalId);
+        const snapshot = await checkout.get(context, externalId);
         return snapshot.value.status === "unknown"
           ? [
               {
@@ -37,4 +48,4 @@ export function createPolarAdapter(): ProviderAdapter {
   };
 }
 
-export { POLAR_API_VERSION } from "./client.js";
+export { POLAR_API_VERSION, POLAR_API_VERSIONS, type PolarApiVersion } from "./api-version.js";

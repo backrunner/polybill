@@ -140,6 +140,20 @@ function eventMapping(
       aggregate: "payment",
     },
     "payment_intent.canceled": { type: "payment.canceled.v1", aggregate: "payment" },
+    "customer.subscription.paused": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "customer.subscription.resumed": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "customer.subscription.trial_will_end": {
+      type: "subscription.changed.v1",
+      aggregate: "subscription",
+    },
+    "customer.subscription.pending_update_applied": {
+      type: "subscription.changed.v1",
+      aggregate: "subscription",
+    },
+    "customer.subscription.pending_update_expired": {
+      type: "subscription.changed.v1",
+      aggregate: "subscription",
+    },
     "customer.subscription.created": { type: "subscription.created.v1", aggregate: "subscription" },
     "customer.subscription.updated": { type: "subscription.changed.v1", aggregate: "subscription" },
     "customer.subscription.deleted": {

@@ -1,0 +1,20 @@
+{
+  "id": "price_next_seats",
+  "product_id": "prod_next_seats",
+  "created_at": "2026-10-02T00:00:00.000Z",
+  "modified_at": null,
+  "source": "catalog",
+  "amount_type": "seat_based",
+  "price_currency": "usd",
+  "tax_behavior": null,
+  "is_archived": false,
+  "tiers": {
+    "type": "graduated",
+    "tiers": [
+      { "bound": 10, "unit_amount": "100.12345678901234567890123456789" },
+      { "bound": null, "unit_amount": "0.000000000000000000000000001" }
+    ]
+  },
+  "minimum_units": 2,
+  "maximum_units": null
+}

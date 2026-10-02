@@ -1,4 +1,5 @@
 export * from "./brand.js";
+export * from "./billing-rate.js";
 export * from "./catalog.js";
 export * from "./commerce.js";
 export * from "./commercial.js";
@@ -11,3 +12,4 @@ export * from "./provider.js";
 export * from "./settlement.js";
 export * from "./subscription.js";
 export * from "./time.js";
+export * from "./usage.js";

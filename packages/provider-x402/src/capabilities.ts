@@ -1,5 +1,6 @@
 import {
   nativeCapability,
+  subscriptionCapabilityGaps,
   unsupportedCapability,
   type CapabilitySnapshot,
   type ProviderContext,
@@ -12,6 +13,9 @@ export function x402Capabilities(context: ProviderContext): CapabilitySnapshot {
     adapterVersion: "0.1.0",
     providerApiVersion: "x402-paysdk@0.1.0",
     capabilities: {
+      ...subscriptionCapabilityGaps(
+        "x402 v1 settles one authorized payment at a time and has no subscription or usage-billing engine",
+      ),
       "checkout.hosted": nativeCapability(),
       "checkout.multi_item": {
         support: "emulated",

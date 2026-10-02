@@ -32,12 +32,16 @@ export const capabilityKeys = [
   "refund.full",
   "dispute.read",
   "subscription.create",
+  "subscription.bind_checkout",
+  "subscription.schedule",
   "subscription.read",
   "subscription.list",
   "subscription.change_items",
   "subscription.pause",
   "subscription.resume",
   "subscription.cancel",
+  "subscription.clear_scheduled_change",
+  "subscription.set_trial_end",
   "subscription.proration",
   "subscription.trial",
   "subscription.mandate",
@@ -66,6 +70,17 @@ export const capabilityKeys = [
 ] as const;
 
 export type CapabilityKey = (typeof capabilityKeys)[number];
+
+/** Missing integrations remain visible to callers of getCapabilities(). */
+export function subscriptionCapabilityGaps(
+  reason: string,
+): Readonly<Partial<Record<CapabilityKey, Capability>>> {
+  return Object.fromEntries(
+    capabilityKeys
+      .filter((key) => key.startsWith("subscription.") || key.startsWith("usage."))
+      .map((key) => [key, unsupportedCapability(reason)]),
+  );
+}
 export type MigrationBehavior = "portable" | "recreate" | "reauthorize" | "pinned";
 
 export interface CapabilityBase {

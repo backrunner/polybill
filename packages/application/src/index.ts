@@ -1,4 +1,7 @@
 export * from "./ad-hoc-checkout.js";
+export * from "./billing-store.js";
+export * from "./credits.js";
+export * from "./usage.js";
 export * from "./catalog.js";
 export * from "./catalog-sync.js";
 export * from "./checkout.js";
@@ -12,3 +15,5 @@ export * from "./reconciliation.js";
 export * from "./refunds.js";
 export * from "./resource-runtime.js";
 export * from "./subscriptions.js";
+export * from "./subscription-authorization.js";
+export * from "./subscription-schedules.js";

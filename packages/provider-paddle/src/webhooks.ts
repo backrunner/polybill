@@ -110,6 +110,11 @@ function mappingFor(
   const map: Readonly<Record<string, { readonly type: string; readonly aggregate: string }>> = {
     "transaction.completed": { type: "payment.succeeded.v1", aggregate: "order" },
     "transaction.payment_failed": { type: "payment.failed.v1", aggregate: "order" },
+    "subscription.activated": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.trialing": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.paused": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.resumed": { type: "subscription.changed.v1", aggregate: "subscription" },
+    "subscription.past_due": { type: "subscription.past_due.v1", aggregate: "subscription" },
     "subscription.created": { type: "subscription.created.v1", aggregate: "subscription" },
     "subscription.updated": { type: "subscription.changed.v1", aggregate: "subscription" },
     "subscription.canceled": { type: "subscription.canceled.v1", aggregate: "subscription" },

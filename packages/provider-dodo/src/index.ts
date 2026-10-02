@@ -6,6 +6,7 @@ import { dodoRefunds } from "./refunds.js";
 import { dodoSubscriptions } from "./subscriptions.js";
 import { dodoWebhooks } from "./webhooks.js";
 import { dodoMigration } from "./migration.js";
+import { dodoUsage } from "./usage.js";
 
 export function createDodoAdapter(): ProviderAdapter {
   return {
@@ -21,6 +22,7 @@ export function createDodoAdapter(): ProviderAdapter {
     subscriptions: dodoSubscriptions,
     refunds: dodoRefunds,
     migration: dodoMigration,
+    usage: dodoUsage,
     webhooks: dodoWebhooks,
     reconcile: {
       async checkout(context, externalId) {

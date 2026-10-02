@@ -265,6 +265,7 @@ export class CheckoutService {
       providerCommand: {
         orderId,
         ...(command.customerId === undefined ? {} : { customerId: command.customerId }),
+        ...(await this.#customerMapping(command.customerId)),
         ...(command.customerEmail === undefined ? {} : { customerEmail: command.customerEmail }),
         lines,
         grossTotal,
@@ -284,6 +285,17 @@ export class CheckoutService {
         metadata: command.metadata ?? {},
       },
     };
+  }
+
+  async #customerMapping(id: CustomerId | undefined): Promise<{ externalCustomerId?: string }> {
+    if (id === undefined) return {};
+    const externalCustomerId = await this.#options.store.getExternalId(
+      this.#options.tenantId,
+      this.#options.connection.id,
+      "customer",
+      id,
+    );
+    return externalCustomerId === undefined ? {} : { externalCustomerId };
   }
 
   #assertAvailable(

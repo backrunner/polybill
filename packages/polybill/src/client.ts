@@ -19,6 +19,11 @@ import {
   ReconciliationService,
   ResourceRuntime,
   SubscriptionService,
+  SubscriptionAuthorizationService,
+  SubscriptionScheduleService,
+  CreditService,
+  UsageService,
+  type BillingStore,
   type ApplicationStore,
   type IdGenerator,
   type Logger,
@@ -63,6 +68,7 @@ export interface PolybillOptions {
   readonly logger?: Logger;
   readonly commercialPolicy?: CommercialPolicy;
   readonly timeoutMs?: number;
+  readonly billing?: { readonly store: BillingStore };
   readonly licensing?: {
     readonly store: LicensingStore;
     readonly crypto: SecretCrypto;
@@ -98,6 +104,10 @@ export interface PolybillClient {
   };
   readonly refunds: RefundService;
   readonly subscriptions: SubscriptionService;
+  readonly subscriptionAuthorizations: SubscriptionAuthorizationService;
+  readonly subscriptionSchedules: SubscriptionScheduleService | undefined;
+  readonly credits: CreditService | undefined;
+  readonly usage: UsageService | undefined;
   readonly reconcile: ReconciliationService;
   readonly discounts: DiscountService;
   readonly discountSync: DiscountSyncService;
@@ -206,6 +216,19 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
     payments: { get: (id) => queries.payment(id) },
     refunds: new RefundService(resources),
     subscriptions: new SubscriptionService(resources),
+    subscriptionAuthorizations: new SubscriptionAuthorizationService(resources),
+    subscriptionSchedules:
+      options.billing === undefined
+        ? undefined
+        : new SubscriptionScheduleService(resources, options.billing.store),
+    credits:
+      options.billing === undefined
+        ? undefined
+        : new CreditService(resources, options.billing.store),
+    usage:
+      options.billing === undefined
+        ? undefined
+        : new UsageService(resources, options.billing.store),
     reconcile: new ReconciliationService(resources),
     discounts,
     discountSync: new DiscountSyncService(resources),
@@ -217,7 +240,45 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
     webhooks: { handler: webhookHandler, consume: webhookConsumer },
     async getCapabilities() {
       const context = await providerContext(shared, undefined);
-      return options.adapter.getCapabilities(context);
+      const snapshot = await options.adapter.getCapabilities(context);
+      if (options.billing === undefined) return snapshot;
+      const emulated = {
+        support: "emulated",
+        fidelity: "workflow",
+        strategy: "polybill_control_plane",
+        environments: [options.connection.environment],
+        constraints: {},
+        migration: "portable",
+      } as const;
+      const items = snapshot.capabilities["subscription.change_items"];
+      const reads = snapshot.capabilities["subscription.read"];
+      return {
+        ...snapshot,
+        capabilities: {
+          ...snapshot.capabilities,
+          "usage.credit": {
+            ...emulated,
+            fidelity: "exact",
+            constraints: { providerWallet: false, negativeBalance: false },
+          },
+          ...(items !== undefined &&
+          items.support !== "unsupported" &&
+          reads !== undefined &&
+          reads.support !== "unsupported"
+            ? {
+                "subscription.schedule": {
+                  ...emulated,
+                  strategy: "host_scheduled_item_changes",
+                  constraints: {
+                    requiresHostScheduler: true,
+                    exactInvoiceTiming: false,
+                    maximumPhases: 10,
+                  },
+                },
+              }
+            : {}),
+        },
+      };
     },
   };
 }

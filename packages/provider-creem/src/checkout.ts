@@ -48,7 +48,11 @@ async function create(
     ...(line.price.kind === "custom"
       ? { custom_price: providerIntegerAmount(line.unitAmount.amount, "creem", 99_999_999, 100) }
       : {}),
-    ...(command.customerEmail === undefined ? {} : { customer: { email: command.customerEmail } }),
+    ...(command.externalCustomerId !== undefined
+      ? { customer: { id: command.externalCustomerId } }
+      : command.customerEmail === undefined
+        ? {}
+        : { customer: { email: command.customerEmail } }),
   };
   const value = decode((await creemRequest(context, "POST", "/v1/checkouts", body)).json());
   return {
@@ -74,8 +78,21 @@ function decode(value: unknown): ProviderCheckoutSnapshot {
           ? "open"
           : "unknown";
   const url = optionalString(root, "checkout_url");
+  const subscription = root.subscription;
+  const subscriptionId =
+    subscription === undefined || subscription === null
+      ? undefined
+      : typeof subscription === "string"
+        ? subscription
+        : stringField(
+            object(subscription, "creem", "creem.checkout.decode"),
+            "id",
+            "creem",
+            "creem.checkout.decode",
+          );
   return {
     externalId: stringField(root, "id", "creem", "creem.checkout.decode"),
+    externalSubscriptionIds: subscriptionId === undefined ? [] : [subscriptionId],
     status,
     ...(url === undefined ? {} : { url }),
     rawStatus,

@@ -18,18 +18,24 @@ describe("Polar migration source", () => {
       {
         method: "GET",
         url: "https://sandbox-api.polar.sh/v1/products/?page=1&limit=100",
-        response: Response.json({
-          items: [{ id: "prod_1" }],
-          pagination: { total_count: 2, max_page: 2 },
-        }),
+        response: Response.json(
+          {
+            items: [{ id: "prod_1" }],
+            pagination: { total_count: 2, max_page: 2 },
+          },
+          { headers: { "Polar-Version": "2026-10" } },
+        ),
       },
       {
         method: "GET",
         url: "https://sandbox-api.polar.sh/v1/products/?page=2&limit=100",
-        response: Response.json({
-          items: [{ id: "prod_2" }],
-          pagination: { total_count: 2, max_page: 2 },
-        }),
+        response: Response.json(
+          {
+            items: [{ id: "prod_2" }],
+            pagination: { total_count: 2, max_page: 2 },
+          },
+          { headers: { "Polar-Version": "2026-10" } },
+        ),
       },
     ]);
     const source = createPolarAdapter().migration;
@@ -43,6 +49,8 @@ describe("Polar migration source", () => {
       code: "unsupported_capability",
     });
     scripted.assertConsumed();
+    for (const request of scripted.requests)
+      expect(request.headers.get("Polar-Version")).toBe("2026-10");
   });
 });
 

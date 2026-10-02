@@ -112,6 +112,7 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
           "customer.delete": nativeCapability(),
           "customer.portal": nativeCapability(),
           "subscription.create": nativeCapability(),
+          "subscription.trial": nativeCapability(),
           "subscription.read": nativeCapability(),
           "subscription.change_items": nativeCapability(),
           "subscription.pause": nativeCapability(),
