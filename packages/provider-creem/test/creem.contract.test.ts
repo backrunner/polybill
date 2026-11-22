@@ -5,6 +5,69 @@ import { describe, expect, it } from "vitest";
 import { createCreemAdapter } from "../src/index.js";
 
 describe("Creem webhook contract", () => {
+  it.each([
+    "credits.granted",
+    "credits.consumed",
+    "credits.reversed",
+    "credits.auto_recharged",
+    "customer_credits.exhausted",
+  ])("maps %s to a wallet read hint on the canonical customer", async (type) => {
+    const body = utf8(
+      JSON.stringify({
+        id: "evt_creditfixture",
+        eventType: type,
+        created_at: Date.parse("2026-08-25T00:00:00.000Z"),
+        object: {
+          id: "cct_example",
+          customer_id: "cust_remote",
+          bucket_name: "Generation",
+          balance_after_minor_units: "99999",
+        },
+      }),
+    );
+    const secret = "creem-webhook-secret";
+    const input = {
+      rawBody: body,
+      headers: new Headers({ "creem-signature": hex(await hmacSha256(secret, body)) }),
+      secret: { active: secret, activeKeyId: "key-current" },
+      environment: "test" as const,
+      now: parseIsoDateTime("2026-08-25T00:00:00.000Z"),
+    };
+    const adapter = createCreemAdapter();
+    const verified = await adapter.webhooks.verify(input);
+    const decoded = adapter.webhooks.decode(verified);
+    const ctx = context(globalThis.fetch);
+    const mapping = {
+      ...ctx,
+      observedAt: input.now,
+      lookup: {
+        findCanonicalId: async ({
+          entityType,
+          externalId,
+        }: {
+          entityType: string;
+          externalId: string;
+        }) =>
+          entityType === "customer" && externalId === "cust_remote" ? "cust_canonical" : undefined,
+      },
+    };
+    await expect(adapter.webhooks.map(decoded, mapping)).resolves.toMatchObject([
+      {
+        type: "credit_wallet.changed.v1",
+        aggregate: { type: "customer", id: "cust_canonical" },
+        data: { walletName: "generation" },
+      },
+    ]);
+    const [event] = await adapter.webhooks.map(decoded, mapping);
+    expect(event?.data).toEqual({ walletName: "generation" });
+    await expect(
+      adapter.webhooks.map(decoded, {
+        ...mapping,
+        lookup: { findCanonicalId: async () => undefined },
+      }),
+    ).resolves.toMatchObject([{ type: "unmapped_provider_event.v1" }]);
+  });
+
   it("encodes bounded numeric custom prices and does not replay tracking references", async () => {
     const scripted = createScriptedFetch([
       {
@@ -37,6 +100,13 @@ describe("Creem webhook contract", () => {
     };
     await adapter.checkout?.create(context(scripted.fetch), command);
     expect(await scripted.requests[0]?.json()).toMatchObject({ units: 3, custom_price: 1500 });
+    await expect(
+      adapter.checkout?.create(context(scripted.fetch), {
+        ...command,
+        customerId: parseId<"CustomerId">("cust_unmapped", "cust"),
+        customerEmail: "buyer@example.test",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
     for (const amount of ["99", "100000000"])
       await expect(
         adapter.checkout?.create(context(scripted.fetch), {
@@ -197,7 +267,7 @@ function context(fetch: typeof globalThis.fetch) {
       provider: "creem" as const,
       environment: "test" as const,
     },
-    credentials: { apiKey: "creem_fixture_key" },
+    credentials: { apiKey: "creem_test_fixture_key" },
     requestId: parseId<"RequestId">("req_creemfixture", "req"),
     idempotencyKey: parseIdempotencyKey("creem-resource-fixture"),
     deadline: parseIsoDateTime("2026-08-25T00:01:00.000Z"),

@@ -1,5 +1,5 @@
 import { createSign } from "node:crypto";
-import { signRsaSha256, utf8 } from "@polybill/adapter-kit";
+import { createWebCryptoPort, signRsaSha256, utf8 } from "@polybill/adapter-kit";
 import { parseId, parseIsoDateTime } from "@polybill/core";
 import { describe, expect, it, vi } from "vitest";
 import { createWaffoAdapter } from "../src/index.js";
@@ -42,6 +42,68 @@ tU4+W+DMMLCp9Tsg5KBb8AAnOBpCrw9QVxhgsWllkzzCs7Ul0kf2HERkqGn1jqk/
 JHiUSwlo70+Fc6A3aVBST2RVB2ELnaAWfPsaLbg+ATcJpC9Iez08Pn1ZmERwbMW+
 ZwIDAQAB
 -----END PUBLIC KEY-----`;
+
+it("issues a Waffo portal URL scoped to the configured store and mapped buyer", async () => {
+  const storeId = "STO_0123456789ABCDEFGHIJKL";
+  const path = `/consumer/portal/store/${storeId}`;
+  const portalUrl = `https://pancake.waffo.ai${path}`;
+  const expiresAt = "2026-10-02T00:10:00.000Z";
+  const token = "session.payload.signature";
+  let origin = portalUrl;
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+    Response.json({ data: { token, portalUrl: origin, expiresAt } }),
+  );
+  const { connection, observedAt } = mapContext();
+  const context = {
+    tenantId: connection.tenantId,
+    connection,
+    credentials: { merchantId: "MER_fixture", privateKey, environment: "test", storeId },
+    requestId: parseId<"RequestId">("req_waffoexample", "req"),
+    deadline: parseIsoDateTime("2026-10-02T00:01:00.000Z"),
+    fetch,
+    clock: { now: () => observedAt },
+    crypto: createWebCryptoPort(),
+  };
+  const adapter = createWaffoAdapter();
+  const portal = adapter.customers?.portal;
+  expect((await adapter.getCapabilities(context)).capabilities).toMatchObject({
+    "customer.portal": { support: "native" },
+    "checkout.discount": { support: "unsupported" },
+    "checkout.ad_hoc_price": { support: "unsupported" },
+  });
+  const result = await portal?.(context, "buyer_fixture", "https://merchant.example");
+  expect(result?.value).toEqual({
+    url: `${portalUrl}#token=${token}`,
+    expiresAt,
+  });
+  expect(result?.evidence).not.toHaveProperty("token");
+  const request = fetch.mock.calls[0];
+  if (request === undefined) throw new Error("Missing portal request");
+  expect(request[0]).toBe("https://api.waffo.ai/v1/actions/auth/issue-session-token");
+  const body: unknown = JSON.parse(String(request[1]?.body));
+  expect(body).toEqual({ storeId, buyerIdentity: "buyer_fixture", purpose: "portal" });
+  expect(new Headers(request[1]?.headers).get("X-Signature")).toBeTruthy();
+  origin = `https://pancake.waffo.ai.other.test${path}`;
+  await expect(
+    portal?.(context, "buyer_fixture", "https://merchant.example"),
+  ).rejects.toMatchObject({
+    code: "provider_response_invalid",
+  });
+  origin = `https://pancake.waffo.ai/consumer/portal/store/STO_other`;
+  await expect(
+    portal?.(context, "buyer_fixture", "https://merchant.example"),
+  ).rejects.toMatchObject({
+    code: "provider_response_invalid",
+  });
+  const noStore = { ...context, credentials: { merchantId: "MER_fixture", privateKey } };
+  expect((await adapter.getCapabilities(noStore)).capabilities["customer.portal"]).toMatchObject({
+    support: "unsupported",
+  });
+  await expect(
+    portal?.(noStore, "buyer_fixture", "https://merchant.example"),
+  ).rejects.toMatchObject({ code: "invalid_request" });
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
 
 describe("Waffo webhook contract", () => {
   it.each([

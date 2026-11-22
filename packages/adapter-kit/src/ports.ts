@@ -14,7 +14,9 @@ import type {
 } from "@polybill/core";
 import type { CapabilitySnapshot } from "./capabilities.js";
 import type { ProviderContext } from "./context.js";
+import type { CreditWalletProvider } from "./credit-wallet-ports.js";
 import type { ProviderMigrationSource } from "./migration.js";
+import type { ModerationProvider } from "./moderation-ports.js";
 import type { UsageProvider } from "./usage-ports.js";
 import type {
   CatalogProvider,
@@ -191,6 +193,8 @@ export interface ProviderAdapter {
   readonly refunds?: RefundProvider;
   readonly discounts?: DiscountProvider;
   readonly usage?: UsageProvider;
+  readonly creditWallets?: CreditWalletProvider;
+  readonly moderation?: ModerationProvider;
   readonly migration?: ProviderMigrationSource;
   readonly webhooks: WebhookProvider;
   readonly reconcile: ReconcileProvider;

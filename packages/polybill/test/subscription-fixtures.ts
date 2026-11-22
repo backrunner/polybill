@@ -25,7 +25,9 @@ export function subscriptionContext(
           ? "sk_test_contract"
           : provider === "paddle"
             ? "pdl_sdbx_contract"
-            : "contract",
+            : provider === "creem"
+              ? "creem_test_contract"
+              : "contract",
       accessToken: "contract",
     },
     requestId: parseId<"RequestId">("req_subcontracts", "req"),

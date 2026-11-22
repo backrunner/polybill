@@ -10,6 +10,7 @@ import { CREEM_API_VERSION } from "./client.js";
 
 export function creemCapabilities(context: ProviderContext): CapabilitySnapshot {
   const native = nativeCapability();
+  const wallet = nativeCapability("pinned");
   return {
     provider: "creem",
     adapterVersion: "0.1.0",
@@ -28,7 +29,7 @@ export function creemCapabilities(context: ProviderContext): CapabilitySnapshot 
       ),
       "payment.one_time": native,
       "customer.read": native,
-      "customer.create": { ...native, constraints: { requiresEmail: true, requiresName: true } },
+      "customer.create": { ...native, constraints: { requiresEmail: true } },
       "customer.update": { ...native, constraints: { emailImmutable: true } },
       "customer.portal": native,
       "subscription.create": unsupportedCapability(
@@ -66,6 +67,12 @@ export function creemCapabilities(context: ProviderContext): CapabilitySnapshot 
         "Creem refund creation does not return a canonical refund ID, amount, and currency for safe read-back",
       ),
       "refund.partial": unsupportedCapability("Creem public refund API only supports full refunds"),
+      "credit_wallet.read": wallet,
+      "credit_wallet.create": { ...wallet, constraints: { startsAtZero: true } },
+      "credit_wallet.grant": wallet,
+      "credit_wallet.debit": { ...wallet, constraints: { moderationRequiredFor: ["generation"] } },
+      "credit_wallet.reverse": { ...wallet, constraints: { originalPolybillTransaction: true } },
+      "moderation.screen": { ...wallet, constraints: { media: ["text"], failClosed: true } },
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",

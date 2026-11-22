@@ -27,7 +27,7 @@ export function createPolarAdapter(options: PolarAdapterOptions = {}): ProviderA
     getCapabilities: async (context) => polarCapabilities(context, apiVersion),
     customers: createPolarCustomers(request),
     checkout,
-    subscriptions: createPolarSubscriptions(request),
+    subscriptions: createPolarSubscriptions(request, apiVersion),
     migration: createPolarMigration(request),
     usage: createPolarUsage(request),
     webhooks: polarWebhooks,

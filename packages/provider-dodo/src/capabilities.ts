@@ -24,6 +24,10 @@ export function dodoCapabilities(context: ProviderContext): CapabilitySnapshot {
         constraints: { requiresPayWhatYouWantProduct: true, oneTimeOnly: true },
       },
       "checkout.multi_item": native,
+      "moderation.screen": {
+        ...nativeCapability("pinned"),
+        constraints: { media: ["text", "image"], failClosed: true },
+      },
       "checkout.discount": unsupportedCapability(
         "Canonical discount redemption and net Order totals are not yet connected to Dodo checkout",
         [

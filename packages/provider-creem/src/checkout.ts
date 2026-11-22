@@ -30,6 +30,17 @@ async function create(
   context: ProviderContext,
   command: ProviderCheckoutCommand,
 ): Promise<ProviderOperationResult<ProviderCheckoutSnapshot>> {
+  if (command.customerId !== undefined && command.externalCustomerId === undefined)
+    throw new PolybillError(
+      "Creem checkout requires a connection mapping for the supplied customer",
+      {
+        code: "not_found",
+        operation: "creem.checkout.create",
+        provider: "creem",
+        connectionId: context.connection.id,
+        retryable: false,
+      },
+    );
   const line = command.lines[0];
   if (command.lines.length !== 1 || line === undefined || line.externalPriceId === undefined)
     throw new PolybillError("Creem checkout requires exactly one mapped product", {

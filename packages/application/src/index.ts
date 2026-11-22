@@ -1,6 +1,7 @@
 export * from "./ad-hoc-checkout.js";
 export * from "./billing-store.js";
 export * from "./credits.js";
+export * from "./credit-wallets.js";
 export * from "./usage.js";
 export * from "./catalog.js";
 export * from "./catalog-sync.js";

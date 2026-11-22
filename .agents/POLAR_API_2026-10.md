@@ -1,6 +1,6 @@
 # Polar API compatibility review
 
-Reviewed: 2026-10-02. Adapter maturity remains experimental; no authenticated sandbox request or
+Reviewed: 2026-11-21. Adapter maturity remains experimental; no authenticated sandbox request or
 hosted webhook endpoint change is part of this review.
 
 ## Official contract
@@ -20,17 +20,19 @@ fails reads and preserves unknown mutation outcomes without retrying or switchin
 
 ## Schema comparison
 
-Official source: `polarsource/polar` commit `d959fcc5ffa9e6da5fa8d23da1868d0bbc945ea2`,
+Official source: `polarsource/polar` commit `95a6a235afda4d2dcc2888186e882e78950ed365`,
 `docs/openapi/{version}.openapi.json`.
 
 | Version | Full source SHA-256 |
 | --- | --- |
 | 2026-04 | `2dbb46c78f2a2956d2c6c7e170e4a8671f3d047ad784bff1acec1b20f69d1060` |
-| 2026-10 | `398c5a94c322aab583fe0a5c716e9f4d8b67f633af2449c26868782dc665cb27` |
+| 2026-10 | `344ab3770d538d8753533ba5c45c442b21ed9f18f37fafc892dc8d143bef853a` |
 
-Excluding generated SDK examples, the adapter's checkout, customer, customer-session, subscription,
-product-list and order-list operations are unchanged. Customer, checkout, subscription, product and
-order schemas and the mapped webhook envelopes are also unchanged between these versions.
+The original 2026-04 to 2026-10 review found equivalent shapes for the used checkout, customer,
+subscription, product and order fields. The November refresh includes additional authorization
+subjects, tighter optional field limits, and `trial_ended` on both API dates. Map `trial_ended` to
+canonical `incomplete` and preserve the raw status. Polar uses it while awaiting payment setup
+after a trial, before any later cancellation.
 
 The changed contracts are webhook endpoint create/update (custom `secret` removed; Polar generates
 new secrets, and the allowed endpoint `api_version` values expand) and license key responses
@@ -51,14 +53,19 @@ Explicit selection is supported with `createPolarAdapter({ apiVersion: "2027-01"
 release. Webhooks accept the Next body version even when HTTP remains on 2026-10.
 
 The candidate source SHA-256 is
-`f5a1ef6d9086d9271775470313e06e81c453b4e0a1474db6bddd21ed04fc80a6` at the source commit above.
+`6def50a8f0228c017a7c3430c8b386d864d43b7b532c37552a91255f97a518e3` at the source commit above.
 Seat prices replace `seat_tiers` with general `tiers` and add `minimum_units` / `maximum_units`.
 `Tier.unit_amount` is an arbitrary-precision decimal string in minor currency units, not integer Money.
 The migration scanner preserves that evidence unchanged; canonical tiered-price conversion remains a
 separate unimplemented feature. Subscription decoders derive quantity from `seats` / `units`, not the
 nested price format. Fixtures cover fractional rates and unlimited bounds without numeric coercion.
+Provider-managed pending discounts in 2027-01 may exist alongside product or quantity changes.
+Discount-only updates do not create canonical item schedules. Item edits and clearing pending
+items check for a provider-managed pending discount before sending a mutation. New catalog
+metadata, optional list filters, and webhook body event IDs are additive to fields used by Polybill.
+The signed webhook ID remains the delivery key.
 
-The expanded lifecycle and usage baseline covers 294 entries for 2026-10 and 290 for 2027-01, including
+The expanded lifecycle and usage baseline covers 294 entries for 2026-10 and 293 for 2027-01, including
 meter creation, event ingestion/list recovery, and active, cycled, migrated, past-due, paused, resumed
 and uncanceled webhook envelopes. Unsupported API dates
 fail before transport; only unknown webhook dates remain unmapped. No automatic version upgrade occurs.

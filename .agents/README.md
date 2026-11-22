@@ -56,6 +56,7 @@ Billing 和 `x402-paysdk`。
 | [SUBSCRIPTIONS_2026-10.md](./SUBSCRIPTIONS_2026-10.md) | 八个平台的订阅机制覆盖、当前实现与待接入项 |
 | [BILLING_WORKFLOWS.md](./BILLING_WORKFLOWS.md) | 异步订阅绑定、延期执行、精确费率与额度账本 |
 | [PROVIDER_API_REVIEW_2026-10-02.md](./PROVIDER_API_REVIEW_2026-10-02.md) | 各家官方 API 与接入文档逐项复核、协议偏差与证据边界 |
+| [PROVIDER_API_REVIEW_2026-11-21.md](./PROVIDER_API_REVIEW_2026-11-21.md) | SDK 与 API 更新、原生额度钱包及独立内容审核 |
 | [WEBHOOKS.md](./WEBHOOKS.md) | 统一入口、签名、inbox、事件归一化和对账 |
 | [MIGRATION.md](./MIGRATION.md) | 已有系统接入、provider 切换、双跑和回滚 |
 | [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) | 现有系统的非侵入接入步骤和 cutback 操作 |

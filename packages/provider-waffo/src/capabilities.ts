@@ -7,6 +7,7 @@ import {
 } from "@polybill/adapter-kit";
 import { parseId } from "@polybill/core";
 import { WAFFO_API_VERSION } from "./client.js";
+import { waffoPortalStore } from "./customers.js";
 
 export function waffoCapabilities(context: ProviderContext): CapabilitySnapshot {
   const native = nativeCapability();
@@ -19,14 +20,20 @@ export function waffoCapabilities(context: ProviderContext): CapabilitySnapshot 
         "Waffo merchant subscription lifecycle integration is not implemented; customer reactivation requires session authorization and canonical read-back bindings are not yet verified",
       ),
       "checkout.hosted": { ...native, constraints: { maxItems: 1, quantity: 1, cancelUrl: false } },
-      "checkout.ad_hoc_price": {
-        ...native,
-        constraints: { requiresApiKey: true, taxCategoryRequired: true },
-      },
+      "checkout.ad_hoc_price": unsupportedCapability(
+        "Waffo price snapshots require a mapped product and its tax category",
+      ),
+      "checkout.discount": unsupportedCapability(
+        "Waffo session creation does not return an authoritative discounted total",
+      ),
       "checkout.multi_item": unsupportedCapability(
         "Waffo checkout sessions lock one product version",
       ),
       "payment.one_time": native,
+      "customer.portal":
+        waffoPortalStore(context) === undefined
+          ? unsupportedCapability("Waffo customer portal requires a configured Pancake store ID")
+          : { ...nativeCapability("pinned"), constraints: { returnUrl: false, mappedBuyer: true } },
       "webhook.verify": native,
       "license.issue": {
         support: "emulated",

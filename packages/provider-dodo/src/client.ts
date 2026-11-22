@@ -7,7 +7,7 @@ import {
 } from "@polybill/adapter-kit";
 import { PolybillError } from "@polybill/core";
 
-export const DODO_API_VERSION = "1.113.6";
+export const DODO_API_VERSION = "1.124.0";
 
 export async function dodoRequest(
   context: ProviderContext,
@@ -46,11 +46,13 @@ export async function dodoRequest(
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (response.status >= 400) throw dodoError(response.status, context);
+  if (response.status >= 400) throw dodoError(response, context);
   return response;
 }
 
-function dodoError(status: number, context: ProviderContext): PolybillError {
+function dodoError(response: HttpResponse, context: ProviderContext): PolybillError {
+  const { status } = response;
+  const retryAfter = Number(response.headers.get("Retry-After") ?? Number.NaN) * 1000;
   const code =
     status === 401
       ? "authentication_failed"
@@ -71,5 +73,8 @@ function dodoError(status: number, context: ProviderContext): PolybillError {
     provider: "dodo",
     connectionId: context.connection.id,
     retryable: status === 429 || status >= 500,
+    ...(status === 429 && Number.isSafeInteger(retryAfter) && retryAfter >= 0
+      ? { retryAfterMs: retryAfter }
+      : {}),
   });
 }

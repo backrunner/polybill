@@ -35,9 +35,18 @@ async function create(
     command.lines.length !== 1 ||
     line === undefined ||
     line.externalPriceId === undefined ||
-    line.quantity !== 1
+    line.quantity !== 1 ||
+    line.price.kind === "custom"
   )
-    throw new PolybillError("Waffo checkout requires one mapped product with quantity one", {
+    throw new PolybillError("Waffo checkout requires one mapped product at its catalog price", {
+      code: "unsupported_capability",
+      operation: "waffo.checkout.create",
+      provider: "waffo",
+      connectionId: context.connection.id,
+      retryable: false,
+    });
+  if (command.discount !== undefined)
+    throw new PolybillError("Waffo checkout does not confirm the quoted discounted total", {
       code: "unsupported_capability",
       operation: "waffo.checkout.create",
       provider: "waffo",

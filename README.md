@@ -44,11 +44,11 @@ All adapters are currently `experimental`; capability snapshots report whether a
 | Provider       | Package                           | Notes                                                            |
 | -------------- | --------------------------------- | ---------------------------------------------------------------- |
 | Stripe         | `@polybill/provider-stripe`       | Checkout, payment, refund, subscription and webhook flows        |
-| Dodo Payments  | `@polybill/provider-dodo`         | Hosted checkout and MoR-oriented flows                           |
+| Dodo Payments  | `@polybill/provider-dodo`         | Hosted checkout, MoR billing and text/image moderation           |
 | Polar          | `@polybill/provider-polar`        | Product alternatives; canonical multi-item carts are unsupported |
-| Creem          | `@polybill/provider-creem`        | Hosted checkout with validated custom pricing                    |
-| Waffo Pancake  | `@polybill/provider-waffo`        | Waffo Pancake MoR adapter                                        |
-| Lemon Squeezy  | `@polybill/provider-lemonsqueezy` | Checkout, subscriptions and signed webhooks                      |
+| Creem          | `@polybill/provider-creem`        | Hosted checkout, native customer credits and prompt moderation   |
+| Waffo Pancake  | `@polybill/provider-waffo`        | Hosted checkout, customer portal SSO and signed webhooks         |
+| Lemon Squeezy  | `@polybill/provider-lemonsqueezy` | Existing stores and migration. Payments end 2027-03-31           |
 | Paddle Billing | `@polybill/provider-paddle`       | Billing checkout and full refunds                                |
 | x402           | `@polybill/provider-x402`         | One-time USDC settlement through `x402-paysdk`                   |
 
@@ -139,6 +139,46 @@ const checkout = await billing.checkouts.create({
 Use a durable store and secret manager in production. Checkout completion is not treated as
 financial finality; reconcile the payment or consume verified provider evidence before high-value
 fulfillment.
+
+### Native customer credits and moderation
+
+Use `polybill/moderation` server-side with a Creem or Dodo moderation adapter. It works on its own
+with the connection and credentials used for the desired test or live environment.
+
+```ts
+import { createModeration } from "polybill/moderation";
+import { creemModeration } from "@polybill/provider-creem/moderation";
+
+const moderation = createModeration({ connection, credentials, provider: creemModeration });
+const result = await moderation.screen({ text: prompt, reference: generationId });
+if (result.decision !== "allow" || result.receipt === undefined) {
+  throw new Error("Generation blocked");
+}
+
+// client was created with createPolybill() on the same Creem connection.
+const debit = await client.creditWallets.debit({
+  customerId,
+  name: "generation",
+  amount: "5",
+  reference: generationId,
+  idempotencyKey: debitKey,
+  moderation: result.receipt,
+});
+```
+
+Provision a wallet with `creditWallets.ensure` or discover one with `get`. Configure **AI generation
+credits** on Creem products and use a mapped canonical customer at checkout. Creem grants credits at
+purchase and renewal. For manual grants use `creditWallets.grant`. Read the current balance with
+`balance` and reverse failed generation spending with
+`reverse({ transactionId: debit.id, idempotencyKey: reversalKey })`. If a write has an unknown
+outcome, repeat the original command with the same idempotency key and input, including its
+moderation receipt if present.
+
+Every generation needs a fresh Creem moderation result. Only `allow` proceeds, and any moderation
+error blocks generation. One receipt authorizes one debit. Dodo also accepts an `image` input as
+base64 through `@polybill/provider-dodo/moderation`. Creem's public endpoint supports text only. See
+the [current provider review](.agents/PROVIDER_API_REVIEW_2026-11-21.md) and
+[Creem's integration guide](https://docs.creem.io/merchant-of-record/account-reviews/gen-ai-technical-integration-guide).
 
 ## Development and verification
 

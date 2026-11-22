@@ -21,6 +21,45 @@ import {
 } from "./subscription-fixtures.js";
 
 describe("subscription policies across providers", () => {
+  it("reads an ended trial and protects a pending discount from item mutations", async () => {
+    const url = "https://sandbox-api.polar.sh/v1/subscriptions/sub_fixture";
+    const response = Response.json(
+      {
+        ...polarSubscription,
+        status: "trial_ended",
+        pending_update: {
+          applies_at: end,
+          product_id: null,
+          seats: null,
+          units: null,
+          discount_id: null,
+          discount_unset: true,
+        },
+      },
+      { headers: { "Polar-Version": "2027-01" } },
+    );
+    const script = createScriptedFetch([
+      { method: "GET", url, response },
+      { method: "GET", url, response },
+      { method: "GET", url, response },
+    ]);
+    const port = createPolarAdapter({ apiVersion: "2027-01" }).subscriptions;
+    const ctx = subscriptionContext("polar", script.fetch);
+    const snapshot = await port?.get?.(ctx, "sub_fixture");
+    expect(snapshot?.value).toMatchObject({ status: "incomplete", rawStatus: "trial_ended" });
+    expect(snapshot?.value.scheduledChange).toBeUndefined();
+    await expect(port?.clearScheduledChange?.(ctx, "sub_fixture", "items")).rejects.toMatchObject({
+      code: "unsupported_capability",
+    });
+    await expect(
+      port?.changeItems?.(ctx, "sub_fixture", {
+        items: [{ externalPriceId: "prod_fixture", quantity: 3 }],
+        policy: { timing: "period_end", proration: "none" },
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_capability" });
+    script.assertConsumed();
+  });
+
   it.each(["2026-10", "2027-01"] as const)(
     "Polar %s schedules seats without granting them early and can clear them",
     async (apiVersion) => {
@@ -39,6 +78,15 @@ describe("subscription policies across providers", () => {
           url: "https://sandbox-api.polar.sh/v1/subscriptions/sub_fixture",
           response: Response.json(pending, { headers: { "Polar-Version": apiVersion } }),
         },
+        ...(apiVersion === "2027-01"
+          ? [
+              {
+                method: "GET" as const,
+                url: "https://sandbox-api.polar.sh/v1/subscriptions/sub_fixture",
+                response: Response.json(pending, { headers: { "Polar-Version": apiVersion } }),
+              },
+            ]
+          : []),
         {
           method: "PATCH",
           url: "https://sandbox-api.polar.sh/v1/subscriptions/sub_fixture",
@@ -65,7 +113,7 @@ describe("subscription policies across providers", () => {
       await expect(
         port?.clearScheduledChange?.(ctx, "sub_fixture", "items"),
       ).resolves.toMatchObject({ value: { items: [{ quantity: 2 }] } });
-      expect(await scripted.requests[2]?.json()).toEqual({ pending_update: null });
+      expect(await scripted.requests.at(-1)?.json()).toEqual({ pending_update: null });
       for (const request of scripted.requests)
         expect(request.headers.get("Polar-Version")).toBe(apiVersion);
       scripted.assertConsumed();

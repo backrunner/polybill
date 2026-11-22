@@ -17,10 +17,12 @@ import {
   type SubscriptionStatus,
 } from "@polybill/core";
 import { polarRequest, type PolarRequest } from "./client.js";
+import { POLAR_API_VERSION, type PolarApiVersion } from "./api-version.js";
 import { polarResult } from "./result.js";
 
 export function createPolarSubscriptions(
   request: PolarRequest = polarRequest,
+  apiVersion: PolarApiVersion = POLAR_API_VERSION,
 ): SubscriptionProvider {
   const update = async (context: Parameters<PolarRequest>[0], id: string, body: unknown) =>
     polarResult(context, decode((await request(context, "PATCH", path(id), body)).json()));
@@ -50,6 +52,15 @@ export function createPolarSubscriptions(
     async clearScheduledChange(context, id, kind) {
       if (!["cancel", "pause", "items"].includes(kind))
         throw new TypeError("Invalid scheduled change");
+      if (kind === "items" && apiVersion === "2027-01") {
+        const current = object(
+          (await request(context, "GET", path(id))).json(),
+          "polar",
+          "polar.subscription.read",
+        );
+        assertSubscriptionIdentity(decode(current).externalId, id, "polar");
+        assertNoPendingDiscount(current);
+      }
       return update(
         context,
         id,
@@ -82,6 +93,7 @@ export function createPolarSubscriptions(
       );
       const snapshot = decode(current);
       assertSubscriptionIdentity(snapshot.externalId, id, "polar");
+      if (apiVersion === "2027-01") assertNoPendingDiscount(current);
       const currentItem = snapshot.items[0];
       if (currentItem === undefined) throw new TypeError("Missing subscription item");
       const proration_behavior =
@@ -134,36 +146,34 @@ function decode(value: unknown): ProviderSubscriptionSnapshot {
   const end = optionalString(root, "current_period_end");
   const trial = optionalString(root, "trial_end");
   const resumes = optionalString(root, "resumes_at");
-  const pending =
-    root.pending_update == null
-      ? undefined
-      : object(root.pending_update, "polar", "polar.subscription.decode");
-  const scheduled: ProviderSubscriptionSnapshot["scheduledChange"] =
-    pending !== undefined
+  const pending = pendingUpdate(root);
+  const hasPendingItems =
+    pending !== undefined &&
+    (pending.product_id != null || pending.seats != null || pending.units != null);
+  const scheduled: ProviderSubscriptionSnapshot["scheduledChange"] = hasPendingItems
+    ? {
+        kind: "items",
+        effectiveAt: parseIsoDateTime(
+          stringField(pending, "applies_at", "polar", "polar.subscription.decode"),
+        ),
+        items: [
+          {
+            externalPriceId: optionalString(pending, "product_id") ?? product,
+            quantity: positiveSubscriptionQuantity(
+              pending.seats ?? pending.units ?? quantity,
+              "polar",
+            ),
+          },
+        ],
+      }
+    : end !== undefined && (root.pause_at_period_end === true || root.cancel_at_period_end === true)
       ? {
-          kind: "items",
-          effectiveAt: parseIsoDateTime(
-            stringField(pending, "applies_at", "polar", "polar.subscription.decode"),
-          ),
-          items: [
-            {
-              externalPriceId: optionalString(pending, "product_id") ?? product,
-              quantity: positiveSubscriptionQuantity(
-                pending.seats ?? pending.units ?? quantity,
-                "polar",
-              ),
-            },
-          ],
+          kind: root.cancel_at_period_end === true ? "cancel" : "pause",
+          effectiveAt: parseIsoDateTime(end),
         }
-      : end !== undefined &&
-          (root.pause_at_period_end === true || root.cancel_at_period_end === true)
-        ? {
-            kind: root.cancel_at_period_end === true ? "cancel" : "pause",
-            effectiveAt: parseIsoDateTime(end),
-          }
-        : rawStatus === "paused" && resumes !== undefined
-          ? { kind: "resume", effectiveAt: parseIsoDateTime(resumes) }
-          : undefined;
+      : rawStatus === "paused" && resumes !== undefined
+        ? { kind: "resume", effectiveAt: parseIsoDateTime(resumes) }
+        : undefined;
   return {
     externalId: stringField(root, "id", "polar", "polar.subscription.decode"),
     externalCustomerId: stringField(root, "customer_id", "polar", "polar.subscription.decode"),
@@ -178,6 +188,19 @@ function decode(value: unknown): ProviderSubscriptionSnapshot {
     rawStatus,
   };
 }
+
+function pendingUpdate(root: Readonly<Record<string, unknown>>) {
+  return root.pending_update == null
+    ? undefined
+    : object(root.pending_update, "polar", "polar.subscription.decode");
+}
+
+function assertNoPendingDiscount(root: Readonly<Record<string, unknown>>) {
+  const pending = pendingUpdate(root);
+  if (pending?.discount_id != null || pending?.discount_unset === true)
+    throw subscriptionUnsupported("polar", "The pending provider change includes a discount");
+}
+
 function status(value: string): SubscriptionStatus | "unknown" {
   switch (value) {
     case "incomplete":
@@ -188,6 +211,8 @@ function status(value: string): SubscriptionStatus | "unknown" {
     case "canceled":
     case "paused":
       return value;
+    case "trial_ended":
+      return "incomplete";
     case "revoked":
       return "canceled";
     default:

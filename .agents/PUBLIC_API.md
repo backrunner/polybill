@@ -44,6 +44,10 @@ verify、inbox claim 和 queue send。业务映射由 `webhooks.consume` 异步�
 ## Compatibility rules
 
 `billing?: { store: BillingStore }` enables `subscriptionSchedules`, `credits`, and `usage` services.
+`client.creditWallets` operates provider-managed balances through canonical customer mappings
+and uses the application store for idempotency and transaction references. The SDK's
+`polybill/moderation` entry point needs only moderation credentials and an explicit connection.
+See the [wallet and moderation contract](./PROVIDER_API_REVIEW_2026-11-21.md).
 `subscriptionAuthorizations.refresh(checkoutId)` polls a scoped checkout and reads its subscriptions
 through the configured adapter. A mapped canonical customer is currently required. Binding never
 grants access or marks payment succeeded. `runDue` is called by the host scheduler and reports each

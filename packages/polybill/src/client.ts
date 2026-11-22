@@ -22,6 +22,7 @@ import {
   SubscriptionAuthorizationService,
   SubscriptionScheduleService,
   CreditService,
+  CreditWalletService,
   UsageService,
   type BillingStore,
   type ApplicationStore,
@@ -54,6 +55,7 @@ import {
   type WebhookQueue,
 } from "@polybill/webhooks";
 import { noopLogger, SecureIdGenerator, systemClock } from "./runtime.js";
+import { createModeration, type ModerationClient } from "./moderation.js";
 
 export interface PolybillOptions {
   readonly tenantId: TenantId;
@@ -107,6 +109,8 @@ export interface PolybillClient {
   readonly subscriptionAuthorizations: SubscriptionAuthorizationService;
   readonly subscriptionSchedules: SubscriptionScheduleService | undefined;
   readonly credits: CreditService | undefined;
+  readonly creditWallets: CreditWalletService;
+  readonly moderation: ModerationClient | undefined;
   readonly usage: UsageService | undefined;
   readonly reconcile: ReconciliationService;
   readonly discounts: DiscountService;
@@ -225,6 +229,18 @@ export function createPolybill(options: PolybillOptions): PolybillClient {
       options.billing === undefined
         ? undefined
         : new CreditService(resources, options.billing.store),
+    creditWallets: new CreditWalletService(resources),
+    moderation:
+      options.adapter.moderation === undefined
+        ? undefined
+        : createModeration({
+            connection: options.connection,
+            credentials: options.credentials,
+            provider: options.adapter.moderation,
+            clock,
+            fetch,
+            ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          }),
     usage:
       options.billing === undefined
         ? undefined

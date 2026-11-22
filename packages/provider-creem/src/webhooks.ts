@@ -1,12 +1,21 @@
 import {
   canonicalWebhookEvent,
   object,
+  optionalString,
   signatureError,
   stringField,
   verifyHmacHex,
   type WebhookProvider,
 } from "@polybill/adapter-kit";
 import { parseIsoDateTime } from "@polybill/core";
+
+const creditEvents = new Set([
+  "credits.granted",
+  "credits.consumed",
+  "credits.reversed",
+  "credits.auto_recharged",
+  "customer_credits.exhausted",
+]);
 
 export const creemWebhooks: WebhookProvider = {
   async verify(input) {
@@ -35,11 +44,14 @@ export const creemWebhooks: WebhookProvider = {
     const root = decodeRoot(event.rawBody);
     const payload = object(root.object, "creem", "creem.webhook.decode");
     const created = root.created_at;
+    const type = stringField(root, "eventType", "creem", "creem.webhook.decode");
+    const customer = creditEvents.has(type) ? optionalString(payload, "customer_id") : undefined;
     return {
-      type: stringField(root, "eventType", "creem", "creem.webhook.decode"),
+      type,
       externalIds: {
         event: stringField(root, "id", "creem", "creem.webhook.decode"),
         object: stringField(payload, "id", "creem", "creem.webhook.decode"),
+        ...(customer === undefined ? {} : { customer }),
       },
       ...(typeof created === "number"
         ? { occurredAt: parseIsoDateTime(new Date(created).toISOString()) }
@@ -48,9 +60,15 @@ export const creemWebhooks: WebhookProvider = {
     };
   },
   async map(event, context) {
+    const creditEvent = creditEvents.has(event.type);
     const mapping = mappingFor(event.type);
-    const externalId = event.externalIds.object;
-    if (mapping === undefined || externalId === undefined)
+    const externalId = creditEvent ? event.externalIds.customer : event.externalIds.object;
+    const name = creditEvent
+      ? optionalString(object(event.payload, "creem", "creem.webhook.map"), "bucket_name")
+          ?.trim()
+          .toLowerCase()
+      : undefined;
+    if (mapping === undefined || externalId === undefined || (creditEvent && !name))
       return [
         await canonicalWebhookEvent({
           event,
@@ -66,14 +84,15 @@ export const creemWebhooks: WebhookProvider = {
       entityType: mapping.aggregate,
       externalId,
     });
+    const mapped = await canonicalWebhookEvent({
+      event,
+      context,
+      type: id === undefined ? "unmapped_provider_event.v1" : mapping.type,
+      aggregateType: id === undefined ? "connection" : mapping.aggregate,
+      aggregateId: id ?? context.connection.id,
+    });
     return [
-      await canonicalWebhookEvent({
-        event,
-        context,
-        type: id === undefined ? "unmapped_provider_event.v1" : mapping.type,
-        aggregateType: id === undefined ? "connection" : mapping.aggregate,
-        aggregateId: id ?? context.connection.id,
-      }),
+      id !== undefined && name !== undefined ? { ...mapped, data: { walletName: name } } : mapped,
     ];
   },
 };
@@ -91,6 +110,7 @@ function decodeRoot(raw: Uint8Array) {
 function mappingFor(
   type: string,
 ): { readonly type: string; readonly aggregate: string } | undefined {
+  if (creditEvents.has(type)) return { type: "credit_wallet.changed.v1", aggregate: "customer" };
   const map: Readonly<Record<string, { readonly type: string; readonly aggregate: string }>> = {
     "checkout.completed": { type: "checkout.completed.v1", aggregate: "checkout" },
     "subscription.trialing": { type: "subscription.changed.v1", aggregate: "subscription" },

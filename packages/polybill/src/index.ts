@@ -9,6 +9,8 @@ export type {
   BillingScope,
   BillingRecord,
   CreditEntry,
+  CreditWalletAdjustment,
+  DebitCreditWalletCommand,
   SubscriptionAuthorization,
   SubscriptionSchedule,
   SubscriptionPhase,

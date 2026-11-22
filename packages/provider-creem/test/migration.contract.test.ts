@@ -63,7 +63,7 @@ function context(fetch: typeof globalThis.fetch) {
   return {
     tenantId,
     connection,
-    credentials: { apiKey: "creem_migration_key" },
+    credentials: { apiKey: "creem_test_migration_key" },
     requestId: parseId<"RequestId">("req_creemmig1", "req"),
     deadline: parseIsoDateTime("2026-08-25T00:01:00.000Z"),
     fetch,

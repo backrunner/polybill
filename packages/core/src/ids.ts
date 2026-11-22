@@ -15,6 +15,7 @@ export type DiscountRedemptionId = Brand<string, "DiscountRedemptionId">;
 export type SubscriptionId = Brand<string, "SubscriptionId">;
 export type MeterId = Brand<string, "MeterId">;
 export type UsageEventId = Brand<string, "UsageEventId">;
+export type CreditTransactionId = Brand<string, "CreditTransactionId">;
 export type EventId = Brand<string, "EventId">;
 export type EvidenceId = Brand<string, "EvidenceId">;
 export type IdempotencyKey = Brand<string, "IdempotencyKey">;

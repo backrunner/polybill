@@ -10,7 +10,7 @@ import {
 } from "@polybill/adapter-kit";
 import { PolybillError } from "@polybill/core";
 
-export const WAFFO_API_VERSION = "v1-2026-08-25";
+export const WAFFO_API_VERSION = "v1-pancake-ts-0.28.0";
 
 export async function waffoRequest(
   context: ProviderContext,

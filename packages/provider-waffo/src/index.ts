@@ -1,6 +1,7 @@
 import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { waffoCapabilities } from "./capabilities.js";
 import { waffoCheckout } from "./checkout.js";
+import { waffoCustomers } from "./customers.js";
 import { waffoWebhooks } from "./webhooks.js";
 
 export function createWaffoAdapter(): ProviderAdapter {
@@ -13,6 +14,7 @@ export function createWaffoAdapter(): ProviderAdapter {
     },
     getCapabilities: async (context) => waffoCapabilities(context),
     checkout: waffoCheckout,
+    customers: waffoCustomers,
     webhooks: waffoWebhooks,
     reconcile: {
       checkout: async (_context, externalId) => [

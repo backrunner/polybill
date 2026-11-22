@@ -2,7 +2,9 @@ import type { ProviderAdapter } from "@polybill/adapter-kit";
 import { creemCapabilities } from "./capabilities.js";
 import { creemCheckout } from "./checkout.js";
 import { creemCustomers } from "./customers.js";
+import { creemCreditWallets } from "./credit-wallets.js";
 import { creemMigration } from "./migration.js";
+import { creemModeration } from "./moderation.js";
 import { creemSubscriptions } from "./subscriptions.js";
 import { creemWebhooks } from "./webhooks.js";
 
@@ -16,6 +18,8 @@ export function createCreemAdapter(): ProviderAdapter {
     },
     getCapabilities: async (context) => creemCapabilities(context),
     customers: creemCustomers,
+    creditWallets: creemCreditWallets,
+    moderation: creemModeration,
     checkout: creemCheckout,
     subscriptions: creemSubscriptions,
     migration: creemMigration,

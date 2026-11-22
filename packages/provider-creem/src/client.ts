@@ -7,7 +7,16 @@ import {
 } from "@polybill/adapter-kit";
 import { PolybillError } from "@polybill/core";
 
-export const CREEM_API_VERSION = "openapi-2026-08-25";
+export const CREEM_API_VERSION = "openapi-2026-11-21";
+
+const creditErrorCodes = new Set([
+  "insufficient_balance",
+  "moderation_denied",
+  "moderation_flagged",
+  "moderation_result_already_used",
+  "moderation_result_expired",
+  "paid_grant_not_reversible",
+]);
 
 export async function creemRequest(
   context: ProviderContext,
@@ -17,8 +26,13 @@ export async function creemRequest(
 ): Promise<HttpResponse> {
   assertCredentialEnvironment(context, "creem.authenticate");
   const apiKey = context.credentials.apiKey;
-  if (apiKey === undefined || apiKey.length < 8)
-    throw new PolybillError("Creem API key is missing", {
+  if (
+    apiKey === undefined ||
+    apiKey.length < 8 ||
+    !apiKey.startsWith("creem_") ||
+    apiKey.startsWith("creem_test_") !== (context.connection.environment === "test")
+  )
+    throw new PolybillError("Creem API key is missing or does not match the environment", {
       code: "authentication_failed",
       operation: "creem.authenticate",
       provider: "creem",
@@ -46,7 +60,10 @@ export async function creemRequest(
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (response.status >= 400)
+  if (response.status >= 400) {
+    const providerCode = path.startsWith("/v1/customer-credits/")
+      ? creditErrorCode(response)
+      : undefined;
     throw new PolybillError("Creem rejected the request", {
       code:
         response.status === 401
@@ -55,15 +72,33 @@ export async function creemRequest(
             ? "permission_denied"
             : response.status === 404
               ? "not_found"
-              : response.status === 429
-                ? "rate_limited"
-                : response.status >= 500
-                  ? "provider_unavailable"
-                  : "invalid_request",
+              : response.status === 409
+                ? "conflict"
+                : response.status === 429
+                  ? "rate_limited"
+                  : response.status >= 500
+                    ? "provider_unavailable"
+                    : "invalid_request",
       operation: "creem.request",
       provider: "creem",
       connectionId: context.connection.id,
       retryable: response.status === 429 || response.status >= 500,
+      ...(providerCode === undefined ? {} : { providerCode }),
     });
+  }
   return response;
+}
+
+function creditErrorCode(response: HttpResponse): string | undefined {
+  try {
+    const body = response.json();
+    if (typeof body !== "object" || body === null || !("error" in body)) return undefined;
+    const error = body.error;
+    if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+    return typeof error.code === "string" && creditErrorCodes.has(error.code)
+      ? error.code
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createWebCryptoPort } from "@polybill/adapter-kit";
 import { parseId } from "@polybill/core";
 import { createWebSecretCrypto, EntitlementService, VoucherService } from "@polybill/licensing";
@@ -22,6 +23,60 @@ describe("example Worker in workerd", () => {
   afterEach(async () => {
     await miniflare?.dispose();
     if (temporary !== undefined) await rm(temporary, { recursive: true, force: true });
+  });
+
+  it("bundles and runs the standalone moderation exports without Node compatibility", async () => {
+    temporary = await mkdtemp(join(tmpdir(), "polybill-moderation-"));
+    await build({
+      stdin: {
+        resolveDir: fileURLToPath(new URL("..", import.meta.url)),
+        contents: `
+          import { createModeration } from "polybill/moderation";
+          import { creemModeration } from "@polybill/provider-creem/moderation";
+          const client = createModeration({
+            provider: creemModeration,
+            connection: { tenantId: ${JSON.stringify(tenantId)}, id: ${JSON.stringify(connectionId)}, provider: "creem", environment: "test" },
+            credentials: { apiKey: "creem_test_fixture" },
+            fetch: async (url, init) => {
+              if (String(url) !== "https://test-api.creem.io/v1/moderation/prompt" || init.method !== "POST")
+                return new Response(undefined, { status: 400 });
+              const { prompt } = JSON.parse(init.body);
+              return Response.json({
+                id: "moderation_fixture",
+                object: "moderation_result",
+                prompt,
+                decision: "flag",
+                usage: { units: 0 },
+              });
+            },
+          });
+          export default {
+            async fetch(request) {
+              return Response.json(await client.screen({ text: await request.text() }));
+            },
+          };
+        `,
+      },
+      outfile: join(temporary, "worker.mjs"),
+      bundle: true,
+      format: "esm",
+      platform: "browser",
+      target: "es2023",
+      conditions: ["workerd", "worker", "import"],
+    });
+    miniflare = new Miniflare({
+      rootPath: temporary,
+      modules: true,
+      modulesRoot: temporary,
+      scriptPath: "worker.mjs",
+      compatibilityDate: "2026-07-30",
+    });
+    const response = await miniflare.dispatchFetch("https://worker.test/moderation", {
+      method: "POST",
+      body: "An illustration of a lighthouse",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ decision: "flag", usageUnits: 0 });
   });
 
   it("ingests a signed webhook through Queue and serializes voucher redemption with a DO", async () => {
@@ -48,7 +103,7 @@ describe("example Worker in workerd", () => {
         POLYBILL_CONNECTION_ID: connectionId,
         POLYBILL_PROVIDER: "creem",
         POLYBILL_ENVIRONMENT: "test",
-        POLYBILL_API_KEY: "creem_fixture_api_key",
+        POLYBILL_API_KEY: "creem_test_fixture_api_key",
         POLYBILL_WEBHOOK_SECRET: "creem_fixture_webhook_secret",
         POLYBILL_DIGEST_KEY: base64(digestKey),
         POLYBILL_ENCRYPTION_KEY: base64(encryptionKey),

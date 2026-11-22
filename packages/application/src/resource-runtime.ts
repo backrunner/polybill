@@ -88,6 +88,8 @@ export class ResourceRuntime {
     readonly key: IdempotencyKey;
     readonly payload: unknown;
     readonly execute: (context: ProviderContext) => Promise<T>;
+    readonly recover?: (context: ProviderContext) => Promise<T | undefined>;
+    readonly tracksMutationsThroughFetch?: true;
     readonly decodeReplay: (value: unknown) => T;
   }): Promise<T> {
     const scope = {
@@ -106,8 +108,14 @@ export class ResourceRuntime {
       throw commandError("idempotency_conflict", input.operation, this.options.connection, false);
     if (claim.kind === "in_progress")
       throw commandError("conflict", input.operation, this.options.connection, true);
-    if (claim.kind === "outcome_unknown")
+    if (claim.kind === "outcome_unknown") {
+      const result = await input.recover?.(context);
+      if (result !== undefined) {
+        await this.options.store.complete(scope, claim.leaseToken, result);
+        return result;
+      }
       throw commandError("outcome_unknown", input.operation, this.options.connection, true);
+    }
     let markerAttempted = false;
     const attempt = trackMutation(context, async () => {
       markerAttempted = true;
@@ -126,7 +134,8 @@ export class ResourceRuntime {
         attempt.mayHaveMutated() ||
         executed ||
         (error instanceof PolybillError &&
-          (error.code === "outcome_unknown" || error.code === "provider_unavailable"))
+          (error.code === "outcome_unknown" ||
+            (error.code === "provider_unavailable" && !input.tracksMutationsThroughFetch)))
       )
         await this.options.store.markUnknown(
           scope,

@@ -3,6 +3,7 @@ export * from "./billing-rate.js";
 export * from "./catalog.js";
 export * from "./commerce.js";
 export * from "./commercial.js";
+export * from "./credit-wallet.js";
 export * from "./discount.js";
 export * from "./errors.js";
 export * from "./events.js";

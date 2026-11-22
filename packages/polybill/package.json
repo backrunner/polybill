@@ -13,6 +13,12 @@
       "workerd": "./dist/index.js",
       "worker": "./dist/index.js",
       "import": "./dist/index.js"
+    },
+    "./moderation": {
+      "types": "./dist/moderation.d.ts",
+      "workerd": "./dist/moderation.js",
+      "worker": "./dist/moderation.js",
+      "import": "./dist/moderation.js"
     }
   },
   "scripts": {

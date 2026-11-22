@@ -11,15 +11,16 @@ import { creemResult } from "./result.js";
 
 export const creemCustomers: CustomerProvider = {
   async create(context, input) {
-    if (input.email === undefined || input.name === undefined)
-      throw unsupported(context, "Creem customer creation requires email and name");
+    if (input.email === undefined)
+      throw unsupported(context, "Creem customer creation requires email");
     return creemResult(
       context,
       decode(
         (
           await creemRequest(context, "POST", "/v1/customers", {
             email: input.email,
-            name: input.name,
+            ...(input.name === undefined ? {} : { name: input.name }),
+            external_id: input.externalReference,
             metadata: {
               ...input.metadata,
               polybill_customer_id: input.externalReference,
